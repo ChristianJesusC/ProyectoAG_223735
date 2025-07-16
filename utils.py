@@ -1,12 +1,200 @@
 import pandas as pd
 import numpy as np
+import random
 from typing import Dict, List, Tuple
-from models import Roommate, Tarea, RangoTiempo, Asignacion, CronogramaSemanal
+from models import Roommate, Tarea, RangoTiempo, TareasPredeterminadas
 
 class DataUtilsMejorado:
     
     @staticmethod
+    def generar_datos_demo_aleatorios():
+        """Genera roommates demo con datos completamente aleatorios - SOLO DATOS"""
+        num_roommates = random.randint(3, 5)
+        
+        roommates_demo = []
+        nombres_usados = set()
+        
+        for _ in range(num_roommates):
+            intentos = 0
+            while intentos < 20:
+                roommate = DataUtilsMejorado.generar_roommate_aleatorio()
+                if roommate.nombre not in nombres_usados:
+                    nombres_usados.add(roommate.nombre)
+                    roommates_demo.append(roommate)
+                    break
+                intentos += 1
+        
+        if len(roommates_demo) < 2:
+            roommates_demo = [
+                DataUtilsMejorado.generar_roommate_aleatorio(),
+                DataUtilsMejorado.generar_roommate_aleatorio(),
+                DataUtilsMejorado.generar_roommate_aleatorio()
+            ]
+        
+        # Seleccionar tareas aleatorias
+        todas_las_tareas = TareasPredeterminadas.get_tareas_basicas()
+        num_tareas = random.randint(8, min(15, len(todas_las_tareas)))
+        tareas_seleccionadas = random.sample(todas_las_tareas, num_tareas)
+        
+        return roommates_demo, tareas_seleccionadas
+    
+    @staticmethod
+    def generar_roommate_aleatorio():
+        """Genera un roommate con datos completamente aleatorios"""
+        nombres_masculinos = [
+            "Alejandro", "Carlos", "Diego", "Eduardo", "Fernando", "Gabriel", "Hugo", "Iván", 
+            "Javier", "Kevin", "Luis", "Mario", "Nicolás", "Oscar", "Pablo", "Ricardo", 
+            "Santiago", "Tomás", "Vicente", "Ximeno"
+        ]
+        
+        nombres_femeninos = [
+            "Ana", "Beatriz", "Carmen", "Diana", "Elena", "Fernanda", "Gabriela", "Helena",
+            "Isabel", "Julia", "Karla", "Laura", "María", "Natalia", "Olivia", "Patricia",
+            "Regina", "Sofía", "Teresa", "Valeria"
+        ]
+        
+        genero = random.choice(["M", "F"])
+        if genero == "M":
+            nombre = random.choice(nombres_masculinos)
+        else:
+            nombre = random.choice(nombres_femeninos)
+        
+        horarios = DataUtilsMejorado.generar_horarios_aleatorios()
+        habilidades = DataUtilsMejorado.generar_habilidades_aleatorias()
+        preferencias = DataUtilsMejorado.generar_preferencias_aleatorias(habilidades)
+        tiempo_objetivo = random.randint(10, 25)
+        
+        return Roommate(nombre, horarios, habilidades, preferencias, tiempo_objetivo)
+    
+    @staticmethod
+    def generar_horarios_aleatorios():
+        """Genera horarios realistas para cada día de la semana"""
+        dias = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
+        horarios = {}
+        
+        patrones_laborales = ["mañana_temprano", "mañana_tarde", "tarde_noche", "noche", "flexible", "estudiante"]
+        patron = random.choice(patrones_laborales)
+        
+        for dia in dias:
+            es_fin_semana = dia in ['Sábado', 'Domingo']
+            rangos_dia = []
+            
+            if patron == "mañana_temprano":
+                if es_fin_semana:
+                    if random.random() > 0.3:
+                        inicio = random.uniform(7, 10)
+                        fin = random.uniform(inicio + 3, 20)
+                        rangos_dia.append(RangoTiempo(inicio, fin))
+                else:
+                    if random.random() > 0.1:
+                        rangos_dia.append(RangoTiempo(6, random.uniform(11, 13)))
+                        if random.random() > 0.5:
+                            rangos_dia.append(RangoTiempo(random.uniform(18, 19), random.uniform(21, 23)))
+            
+            elif patron == "mañana_tarde":
+                if es_fin_semana:
+                    if random.random() > 0.2:
+                        inicio = random.uniform(8, 11)
+                        fin = random.uniform(inicio + 4, 22)
+                        rangos_dia.append(RangoTiempo(inicio, fin))
+                else:
+                    if random.random() > 0.1:
+                        rangos_dia.append(RangoTiempo(random.uniform(7, 9), random.uniform(15, 17)))
+                        if random.random() > 0.6:
+                            rangos_dia.append(RangoTiempo(random.uniform(19, 20), random.uniform(22, 23.5)))
+            
+            elif patron == "tarde_noche":
+                if es_fin_semana:
+                    if random.random() > 0.2:
+                        rangos_dia.append(RangoTiempo(random.uniform(9, 12), random.uniform(18, 23)))
+                else:
+                    if random.random() > 0.1:
+                        if random.random() > 0.4:
+                            rangos_dia.append(RangoTiempo(random.uniform(6, 8), random.uniform(9, 11)))
+                        rangos_dia.append(RangoTiempo(random.uniform(14, 16), random.uniform(21, 23)))
+            
+            elif patron == "noche":
+                if es_fin_semana:
+                    if random.random() > 0.1:
+                        rangos_dia.append(RangoTiempo(random.uniform(10, 14), random.uniform(20, 23.5)))
+                else:
+                    if random.random() > 0.2:
+                        rangos_dia.append(RangoTiempo(random.uniform(18, 19), random.uniform(22, 23.5)))
+            
+            elif patron == "estudiante":
+                if es_fin_semana:
+                    if random.random() > 0.1:
+                        rangos_dia.append(RangoTiempo(random.uniform(9, 12), random.uniform(16, 23)))
+                else:
+                    if random.random() > 0.2:
+                        if random.random() > 0.3:
+                            rangos_dia.append(RangoTiempo(random.uniform(6, 8), random.uniform(9, 12)))
+                        if random.random() > 0.2:
+                            rangos_dia.append(RangoTiempo(random.uniform(18, 19), random.uniform(21, 23)))
+            
+            elif patron == "flexible":
+                num_rangos = random.choice([0, 1, 1, 2, 2, 3])
+                for _ in range(num_rangos):
+                    inicio = random.uniform(6, 20)
+                    duracion = random.uniform(2, 8)
+                    fin = min(24, inicio + duracion)
+                    if fin > inicio + 1:
+                        rangos_dia.append(RangoTiempo(inicio, fin))
+            
+            # Redondear horarios a medias horas
+            rangos_redondeados = []
+            for rango in rangos_dia:
+                inicio_redondeado = round(rango.inicio * 2) / 2
+                fin_redondeado = round(rango.fin * 2) / 2
+                if fin_redondeado > inicio_redondeado + 0.5:
+                    rangos_redondeados.append(RangoTiempo(inicio_redondeado, fin_redondeado))
+            
+            if rangos_redondeados:
+                horarios[dia] = rangos_redondeados
+        
+        return horarios
+    
+    @staticmethod
+    def generar_habilidades_aleatorias():
+        """Genera habilidades con cierta especialización realista"""
+        categorias = ['Limpieza', 'Cocina', 'Lavandería', 'Compras', 'Mantenimiento', 'Organización']
+        habilidades = {}
+        
+        especialidades = random.sample(categorias, random.randint(1, 2))
+        debilidades = random.sample([cat for cat in categorias if cat not in especialidades], 
+                                   random.randint(1, min(2, len(categorias) - len(especialidades))))
+        
+        for categoria in categorias:
+            if categoria in especialidades:
+                habilidades[categoria] = random.randint(7, 10)
+            elif categoria in debilidades:
+                habilidades[categoria] = random.randint(1, 4)
+            else:
+                habilidades[categoria] = random.randint(4, 7)
+        
+        return habilidades
+    
+    @staticmethod
+    def generar_preferencias_aleatorias(habilidades):
+        """Genera preferencias coherentes con las habilidades"""
+        categorias = ['Limpieza', 'Cocina', 'Lavandería', 'Compras', 'Mantenimiento', 'Organización']
+        preferencias = {}
+        
+        for categoria in categorias:
+            nivel_habilidad = habilidades[categoria]
+            
+            if nivel_habilidad >= 8:
+                preferencias[categoria] = random.choices(['prefiere', 'neutro'], weights=[0.8, 0.2])[0]
+            elif nivel_habilidad <= 3:
+                preferencias[categoria] = random.choices(['evita', 'neutro'], weights=[0.7, 0.3])[0]
+            else:
+                preferencias[categoria] = random.choices(['prefiere', 'neutro', 'evita'], weights=[0.3, 0.5, 0.2])[0]
+        
+        return preferencias
+    
+    @staticmethod
     def cronograma_a_dataframe(cronograma: Dict) -> pd.DataFrame:
+        """Convierte cronograma a DataFrame"""
         data = []
         for key, asignacion in cronograma.items():
             hora_fin = asignacion['hora'] + (asignacion['duracion'] / 60)
@@ -20,100 +208,23 @@ class DataUtilsMejorado:
                 'Duración (min)': asignacion['duracion']
             })
         return pd.DataFrame(data)
-    
+
     @staticmethod
-    def calcular_estadisticas_mejoradas(cronograma: Dict, roommates: List[Roommate]) -> Dict:
-        cronograma_obj = CronogramaSemanal()
-        for key, asig_dict in cronograma.items():
-            asignacion = Asignacion(**asig_dict)
-            cronograma_obj.agregar_asignacion(key, asignacion)
+    def analizar_roommates_generados(roommates_demo):
+        """Analiza los roommates generados y devuelve estadísticas"""
+        analisis = []
         
-        carga_por_roommate = cronograma_obj.calcular_carga_por_roommate()
-        tareas_por_roommate = {rm.nombre: 0 for rm in roommates}
+        for rm in roommates_demo:
+            especialidades = [cat for cat, nivel in rm.habilidades.items() if nivel >= 8]
+            debilidades = [cat for cat, nivel in rm.habilidades.items() if nivel <= 3]
+            horas_totales = rm.total_horas_disponibles()
+            
+            analisis.append({
+                'nombre': rm.nombre,
+                'especialidades': especialidades,
+                'debilidades': debilidades,
+                'horas_totales': horas_totales,
+                'tiempo_objetivo': rm.tiempo_total_disponible
+            })
         
-        for asignacion in cronograma.values():
-            tareas_por_roommate[asignacion['roommate']] += 1
-        
-        cargas = list(carga_por_roommate.values())
-        tiempos_muertos = cronograma_obj.calcular_tiempos_muertos(roommates)
-        
-        tiempo_muerto_total = sum(tiempos_muertos.values())
-        tiempo_trabajo_total = sum(carga_por_roommate.values())
-        eficiencia_temporal = tiempo_trabajo_total / (tiempo_trabajo_total + tiempo_muerto_total) * 100 if (tiempo_trabajo_total + tiempo_muerto_total) > 0 else 100
-        
-        return {
-            'carga_por_roommate': carga_por_roommate,
-            'tareas_por_roommate': tareas_por_roommate,
-            'tiempos_muertos_por_roommate': tiempos_muertos,
-            'tiempo_promedio': np.mean(cargas),
-            'desviacion_estandar': np.std(cargas),
-            'coeficiente_variacion': (np.std(cargas) / np.mean(cargas)) * 100 if np.mean(cargas) > 0 else 0,
-            'indice_equidad': max(0, 100 - ((np.std(cargas) / np.mean(cargas)) * 100)) if np.mean(cargas) > 0 else 100,
-            'tiempo_muerto_total': tiempo_muerto_total,
-            'eficiencia_temporal': eficiencia_temporal
-        }
-    
-    @staticmethod
-    def generar_datos_ejemplo_mejorados() -> Tuple[List[Roommate], List[Tarea]]:
-        roommate1 = Roommate(
-            nombre="Ana",
-            horarios_disponibles={
-                'Lunes': [RangoTiempo(8, 12), RangoTiempo(18, 22)],
-                'Martes': [RangoTiempo(8, 12), RangoTiempo(18, 22)],
-                'Miércoles': [RangoTiempo(8, 12), RangoTiempo(18, 22)],
-                'Jueves': [RangoTiempo(8, 12), RangoTiempo(18, 22)],
-                'Viernes': [RangoTiempo(8, 12), RangoTiempo(18, 22)],
-                'Sábado': [RangoTiempo(9, 15), RangoTiempo(19, 23)],
-                'Domingo': [RangoTiempo(10, 20)]
-            },
-            habilidades={'Limpieza': 8, 'Cocina': 6, 'Lavandería': 7, 'Compras': 9, 'Mantenimiento': 4, 'Organización': 8},
-            preferencias={'Limpieza': 'prefiere', 'Cocina': 'neutro', 'Lavandería': 'neutro', 'Compras': 'prefiere', 'Mantenimiento': 'evita', 'Organización': 'prefiere'},
-            tiempo_total_disponible=20
-        )
-        
-        roommate2 = Roommate(
-            nombre="Carlos",
-            horarios_disponibles={
-                'Lunes': [RangoTiempo(14, 18), RangoTiempo(20, 23)],
-                'Martes': [RangoTiempo(14, 18), RangoTiempo(20, 23)],
-                'Miércoles': [RangoTiempo(14, 18), RangoTiempo(20, 23)],
-                'Jueves': [RangoTiempo(14, 18), RangoTiempo(20, 23)],
-                'Viernes': [RangoTiempo(14, 18), RangoTiempo(20, 23)],
-                'Sábado': [RangoTiempo(8, 12), RangoTiempo(16, 20)],
-                'Domingo': [RangoTiempo(8, 20)]
-            },
-            habilidades={'Limpieza': 5, 'Cocina': 9, 'Lavandería': 6, 'Compras': 7, 'Mantenimiento': 8, 'Organización': 5},
-            preferencias={'Limpieza': 'neutro', 'Cocina': 'prefiere', 'Lavandería': 'neutro', 'Compras': 'neutro', 'Mantenimiento': 'prefiere', 'Organización': 'evita'},
-            tiempo_total_disponible=18
-        )
-        
-        roommate3 = Roommate(
-            nombre="María",
-            horarios_disponibles={
-                'Lunes': [RangoTiempo(6, 10), RangoTiempo(16, 19)],
-                'Martes': [RangoTiempo(6, 10), RangoTiempo(16, 19)],
-                'Miércoles': [RangoTiempo(6, 10), RangoTiempo(16, 19)],
-                'Jueves': [RangoTiempo(6, 10), RangoTiempo(16, 19)],
-                'Viernes': [RangoTiempo(6, 10), RangoTiempo(16, 19)],
-                'Sábado': [RangoTiempo(10, 14), RangoTiempo(18, 22)],
-                'Domingo': [RangoTiempo(10, 22)]
-            },
-            habilidades={'Limpieza': 7, 'Cocina': 8, 'Lavandería': 9, 'Compras': 6, 'Mantenimiento': 6, 'Organización': 9},
-            preferencias={'Limpieza': 'neutro', 'Cocina': 'prefiere', 'Lavandería': 'prefiere', 'Compras': 'evita', 'Mantenimiento': 'neutro', 'Organización': 'prefiere'},
-            tiempo_total_disponible=22
-        )
-        
-        tareas_ejemplo = [
-            Tarea("Lavar platos", "diaria", 30, 3, "Limpieza"),
-            Tarea("Cocinar cena", "diaria", 60, 6, "Cocina", hora_preferida=19),
-            Tarea("Limpiar baño", "semanal", 90, 7, "Limpieza"),
-            Tarea("Aspirar sala", "semanal", 60, 4, "Limpieza"),
-            Tarea("Lavar ropa", "semanal", 120, 5, "Lavandería", dias_requeridos=["Sábado", "Domingo"]),
-            Tarea("Comprar víveres", "semanal", 120, 6, "Compras", dias_requeridos=["Sábado"]),
-            Tarea("Limpiar cocina", "semanal", 60, 5, "Limpieza"),
-            Tarea("Organizar espacios", "mensual", 180, 8, "Organización"),
-            Tarea("Sacar basura", "diaria", 30, 2, "Limpieza", hora_preferida=20),
-            Tarea("Preparar desayuno", "diaria", 30, 4, "Cocina", hora_preferida=7)
-        ]
-        
-        return [roommate1, roommate2, roommate3], tareas_ejemplo
+        return analisis

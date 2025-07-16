@@ -16,6 +16,13 @@ class AlgoritmoGeneticoOptimizado:
         self.tasa_mutacion = tasa_mutacion
         self.tasa_cruzamiento = tasa_cruzamiento
         self.dias_semana = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
+        self.semanas = [1, 2, 3, 4]  # 4 semanas del mes
+        
+        # Intervalos de 30 minutos desde las 6:00 hasta las 23:30
+        self.intervalos_30min = []
+        for h in range(6, 24):
+            self.intervalos_30min.append(h)
+            self.intervalos_30min.append(h + 0.5)
         
         self.pesos = {
             'equidad': 25,
@@ -23,58 +30,100 @@ class AlgoritmoGeneticoOptimizado:
             'habilidades': 20,
             'preferencias': 10,
             'rotacion': 10,
-            'tiempos_muertos': 10
+            'cocina_diaria': 10
         }
     
     def generar_individuo(self) -> Dict:
+        """Genera un cronograma mensual (4 semanas diferentes)"""
         asignaciones = {}
         
+        # Primero asegurar que hay cocina todos los días en todas las semanas
+        self._asegurar_cocina_diaria(asignaciones)
+        
+        # Luego agregar el resto de tareas
         for tarea in self.tareas:
-            repeticiones = self._calcular_repeticiones(tarea)
-            
-            for rep in range(repeticiones):
-                roommate = random.choice(self.roommates)
-                dia = self._seleccionar_dia(tarea)
-                hora = self._seleccionar_hora(roommate, dia, tarea)
-                
-                key = f"{tarea.nombre}_{rep}_{dia}_{hora}"
-                asignaciones[key] = {
-                    'tarea': tarea.nombre,
-                    'roommate': roommate.nombre,
-                    'dia': dia,
-                    'hora': int(hora),
-                    'duracion': tarea.tiempo_estimado
-                }
+            if tarea.categoria != 'Cocina':  # La cocina ya está asignada
+                self._asignar_tarea_mensual(tarea, asignaciones)
         
         return asignaciones
     
-    def _seleccionar_hora(self, roommate: Roommate, dia: str, tarea: Tarea) -> float:
+    def _asegurar_cocina_diaria(self, asignaciones: Dict):
+        """Asegura que haya al menos una tarea de cocina cada día en cada semana"""
+        tareas_cocina = [t for t in self.tareas if t.categoria == 'Cocina']
+        
+        if not tareas_cocina:
+            return
+        
+        for semana in self.semanas:
+            for dia in self.dias_semana:
+                # Seleccionar una tarea de cocina aleatoria
+                tarea_cocina = random.choice(tareas_cocina)
+                roommate = random.choice(self.roommates)
+                hora = self._seleccionar_hora_30min(roommate, dia, tarea_cocina)
+                
+                key = f"cocina_obligatoria_S{semana}_{dia}_{hora}"
+                asignaciones[key] = {
+                    'tarea': tarea_cocina.nombre,
+                    'roommate': roommate.nombre,
+                    'dia': dia,
+                    'semana': semana,
+                    'hora': hora,
+                    'duracion': tarea_cocina.tiempo_estimado
+                }
+    
+    def _asignar_tarea_mensual(self, tarea: Tarea, asignaciones: Dict):
+        """Asigna una tarea a lo largo del mes (4 semanas)"""
+        repeticiones_mes = self._calcular_repeticiones_mensuales(tarea)
+        
+        for rep in range(repeticiones_mes):
+            semana = random.choice(self.semanas)
+            roommate = random.choice(self.roommates)
+            dia = self._seleccionar_dia(tarea)
+            hora = self._seleccionar_hora_30min(roommate, dia, tarea)
+            
+            key = f"{tarea.nombre}_S{semana}_{rep}_{dia}_{hora}"
+            asignaciones[key] = {
+                'tarea': tarea.nombre,
+                'roommate': roommate.nombre,
+                'dia': dia,
+                'semana': semana,
+                'hora': hora,
+                'duracion': tarea.tiempo_estimado
+            }
+    
+    def _seleccionar_hora_30min(self, roommate: Roommate, dia: str, tarea: Tarea) -> float:
+        """Selecciona una hora en intervalos de 30 minutos"""
         if tarea.hora_preferida is not None:
-            if roommate.esta_disponible(dia, tarea.hora_preferida):
-                return tarea.hora_preferida
+            # Redondear a intervalo de 30 min más cercano
+            hora_preferida = round(tarea.hora_preferida * 2) / 2
+            if roommate.esta_disponible(dia, hora_preferida):
+                return hora_preferida
         
         if dia in roommate.horarios_disponibles:
             rangos_validos = roommate.horarios_disponibles[dia]
             if rangos_validos:
                 rango = random.choice(rangos_validos)
                 opciones_hora = []
-                hora_actual = rango.inicio
-                while hora_actual < rango.fin:
-                    opciones_hora.append(hora_actual)
-                    hora_actual += 0.5
+                
+                for hora in self.intervalos_30min:
+                    if rango.contiene_hora(hora):
+                        opciones_hora.append(hora)
+                
                 if opciones_hora:
                     return random.choice(opciones_hora)
         
-        return random.randint(6, 22)
+        # Si no hay disponibilidad, usar horario aleatorio en intervalos de 30 min
+        return random.choice(self.intervalos_30min)
     
-    def _calcular_repeticiones(self, tarea: Tarea) -> int:
+    def _calcular_repeticiones_mensuales(self, tarea: Tarea) -> int:
+        """Calcula repeticiones para todo el mes"""
         if tarea.frecuencia == 'diaria':
-            return 7
+            return 28  # 7 días × 4 semanas
         elif tarea.frecuencia == 'semanal':
-            return 1
+            return 4   # Una vez por semana × 4 semanas
         elif tarea.frecuencia == 'mensual':
-            return 1 if random.random() < 0.25 else 0
-        return 1
+            return 1   # Una vez al mes
+        return 4
     
     def _seleccionar_dia(self, tarea: Tarea) -> str:
         if tarea.dias_requeridos:
@@ -92,25 +141,78 @@ class AlgoritmoGeneticoOptimizado:
             fitness_total += self._calcular_fitness_compatibilidad(individuo) * self.pesos['compatibilidad']
             fitness_total += self._calcular_fitness_habilidades(individuo) * self.pesos['habilidades']
             fitness_total += self._calcular_fitness_preferencias(individuo) * self.pesos['preferencias']
+            fitness_total += self._calcular_fitness_rotacion(individuo) * self.pesos['rotacion']
+            fitness_total += self._calcular_fitness_cocina_diaria(individuo) * self.pesos['cocina_diaria']
         except Exception:
             return 0.0
         
         return max(0, fitness_total)
     
+    def _calcular_fitness_cocina_diaria(self, individuo: Dict) -> float:
+        """Fitness para asegurar cocina diaria en cada semana"""
+        cocina_por_dia_semana = {}
+        
+        for asignacion in individuo.values():
+            tarea_obj = next((t for t in self.tareas if t.nombre == asignacion['tarea']), None)
+            if tarea_obj and tarea_obj.categoria == 'Cocina':
+                semana = asignacion['semana']
+                dia = asignacion['dia']
+                key = f"S{semana}_{dia}"
+                
+                if key not in cocina_por_dia_semana:
+                    cocina_por_dia_semana[key] = 0
+                cocina_por_dia_semana[key] += 1
+        
+        # Debería haber 28 días con cocina (7 días × 4 semanas)
+        dias_con_cocina = len([k for k, v in cocina_por_dia_semana.items() if v > 0])
+        return dias_con_cocina / 28.0
+    
+    def _calcular_fitness_rotacion(self, individuo: Dict) -> float:
+        """Fitness para promover rotación entre semanas"""
+        asignaciones_por_semana = {1: {}, 2: {}, 3: {}, 4: {}}
+        
+        for asignacion in individuo.values():
+            semana = asignacion['semana']
+            roommate = asignacion['roommate']
+            tarea = asignacion['tarea']
+            
+            if roommate not in asignaciones_por_semana[semana]:
+                asignaciones_por_semana[semana][roommate] = set()
+            asignaciones_por_semana[semana][roommate].add(tarea)
+        
+        # Calcular diversidad de tareas por roommate entre semanas
+        diversidad_total = 0
+        for roommate in [rm.nombre for rm in self.roommates]:
+            tareas_todas_semanas = set()
+            for semana in self.semanas:
+                if roommate in asignaciones_por_semana[semana]:
+                    tareas_todas_semanas.update(asignaciones_por_semana[semana][roommate])
+            diversidad_total += len(tareas_todas_semanas)
+        
+        max_diversidad = len(self.roommates) * len(self.tareas)
+        return diversidad_total / max_diversidad if max_diversidad > 0 else 1.0
+    
     def _calcular_fitness_equidad(self, individuo: Dict) -> float:
-        carga_por_roommate = {}
+        """Fitness para equidad de carga entre roommates por semana"""
+        carga_por_roommate_semana = {}
         
         for asignacion in individuo.values():
             roommate = asignacion['roommate']
-            if roommate not in carga_por_roommate:
-                carga_por_roommate[roommate] = 0
-            carga_por_roommate[roommate] += asignacion['duracion']
+            semana = asignacion['semana']
+            key = f"{roommate}_S{semana}"
+            
+            if key not in carga_por_roommate_semana:
+                carga_por_roommate_semana[key] = 0
+            carga_por_roommate_semana[key] += asignacion['duracion']
         
+        # Completar con ceros para roommates sin asignaciones
         for roommate in self.roommates:
-            if roommate.nombre not in carga_por_roommate:
-                carga_por_roommate[roommate.nombre] = 0
+            for semana in self.semanas:
+                key = f"{roommate.nombre}_S{semana}"
+                if key not in carga_por_roommate_semana:
+                    carga_por_roommate_semana[key] = 0
         
-        cargas = list(carga_por_roommate.values())
+        cargas = list(carga_por_roommate_semana.values())
         if len(cargas) <= 1 or np.mean(cargas) == 0:
             return 1.0
         
@@ -206,14 +308,16 @@ class AlgoritmoGeneticoOptimizado:
             if random.random() < self.tasa_mutacion:
                 asignacion_mutada = asignacion.copy()
                 
-                tipo_mutacion = random.choice(['roommate', 'horario', 'dia'])
+                tipo_mutacion = random.choice(['roommate', 'horario', 'dia', 'semana'])
                 
                 if tipo_mutacion == 'roommate':
                     asignacion_mutada['roommate'] = random.choice(self.roommates).nombre
                 elif tipo_mutacion == 'horario':
-                    asignacion_mutada['hora'] = random.randint(6, 22)
+                    asignacion_mutada['hora'] = random.choice(self.intervalos_30min)
                 elif tipo_mutacion == 'dia':
                     asignacion_mutada['dia'] = random.choice(self.dias_semana)
+                elif tipo_mutacion == 'semana':
+                    asignacion_mutada['semana'] = random.choice(self.semanas)
                 
                 individuo_mutado[key] = asignacion_mutada
             else:

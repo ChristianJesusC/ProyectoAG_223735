@@ -1,265 +1,230 @@
 import streamlit as st
-import pandas as pd
 import plotly.express as px
-import numpy as np
-from datetime import date, timedelta
+import pandas as pd
+from datetime import date
 
-# Importaciones originales
-from models import Roommate, Tarea, RangoTiempo, TareasPredeterminadas, EspacioHogar
-from genetic_algorithm import AlgoritmoGeneticoOptimizado
-from calendar_views import (
-    crear_calendario_mensual, mostrar_calendario_individual,
-    mostrar_vista_tabla, get_roommate_color, crear_calendario_mensual_con_conflictos
+# Importaciones del sistema
+from models import Roommate, Tarea, TareasPredeterminadas, EspacioHogar
+from core.genetic_algorithm import AlgoritmoGenetico
+from core.student_patterns import PatronesEstudiantiles
+from ui.setup import mostrar_setup
+from ui.calendar import mostrar_calendario
+from ui.export import mostrar_exportacion
+
+# Configuración de la página
+st.set_page_config(
+    page_title="ROOMIETASKAI",
+    page_icon="🏠",
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
-from ui_components import UIComponentsMejorado
-from utils import DataUtilsMejorado
-from rotation_manager import RotationManager
-from analysis_components import AnalysisComponents
 
-from enhanced_models import RoommateEnhanced, RestriccionMedica, Ausencia
-from absence_manager import ManagerAusencias
-from emergency_manager import ManagerEmergencias
-from task_exchange import IntercambiadorTareas
-from feedback_system import SistemaFeedback
-from student_patterns import PatronesEstudiantiles
-from enhanced_genetic_algorithm import AlgoritmoGeneticoMejorado
-
-st.set_page_config(page_title="ROOMIETASKAI", page_icon="🏠", layout="wide")
-
-def init_session():
+def init_session_state():
+    """Inicializa el estado de la sesión"""
     defaults = {
         'roommates': [],
         'tareas': [],
         'cronograma': None,
         'fitness_historia': [],
-        'form_counter': 0,
-        'espacio_hogar': EspacioHogar(),
-        'demo_cargada': False,
-        'sistema_feedback': None,
-        'usar_algoritmo_mejorado': True,
-        'emergencias_activas': [],
-        'intercambios_pendientes': [],
-        'historial_intercambios': []
+        'espacio': EspacioHogar(),  # Espacio por defecto
+        'version': '2.0'
     }
+    
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
 
-def cargar_datos_demo_simple():
-    """Función simplificada que solo carga datos sin UI compleja"""
-    roommates_demo, tareas_seleccionadas = DataUtilsMejorado.generar_datos_demo_aleatorios()
-    
-    # Convertir a RoommateEnhanced para aprovechar nuevas características
-    roommates_enhanced = []
-    for rm in roommates_demo:
-        rm_enhanced = RoommateEnhanced(
-            nombre=rm.nombre,
-            horarios_disponibles=rm.horarios_disponibles,
-            habilidades=rm.habilidades,
-            preferencias=rm.preferencias,
-            tiempo_total_disponible=rm.tiempo_total_disponible,
-            restricciones_medicas=[],
-            incompatibilidades=[],
-            ausencias=[]
-        )
-        
-        # Agregar algunas restricciones demo aleatorias
-        if np.random.random() < 0.3:  # 30% chance de tener restricción
-            tipo_restriccion = np.random.choice(['alergia', 'limitacion_fisica', 'medica'])
-            categoria_afectada = np.random.choice(['Limpieza', 'Cocina', 'Mantenimiento'])
-            severidad = np.random.choice(['limitado', 'con_ayuda'])
-            
-            restriccion = RestriccionMedica(
-                categoria_tarea=categoria_afectada,
-                tipo_restriccion=tipo_restriccion,
-                descripcion=f"Demo: {tipo_restriccion} en {categoria_afectada}",
-                severidad=severidad
-            )
-            rm_enhanced.restricciones_medicas.append(restriccion)
-        
-        roommates_enhanced.append(rm_enhanced)
-    
-    st.session_state.roommates = roommates_enhanced
-    st.session_state.tareas = tareas_seleccionadas
-    st.session_state.demo_cargada = True
-    
-    return len(roommates_enhanced), len(tareas_seleccionadas)
-
-def mostrar_resumen_demo():
-    """Muestra el resumen de la demo cargada en el área principal"""
-    if st.session_state.demo_cargada and st.session_state.roommates:
-        st.info(f"🎲 **Demo cargada**: {len(st.session_state.roommates)} roommates aleatorios con {len(st.session_state.tareas)} tareas")
-        
-        with st.expander("📋 Ver detalles de roommates generados", expanded=False):
-            analisis_roommates = DataUtilsMejorado.analizar_roommates_generados(st.session_state.roommates)
-            
-            for analisis in analisis_roommates:
-                col1, col2, col3 = st.columns(3)
-                
-                with col1:
-                    st.write(f"**👤 {analisis['nombre']}**")
-                    st.write(f"⏰ {analisis['horas_totales']:.1f}h/semana disponibles")
-                    st.write(f"🎯 Objetivo: {analisis['tiempo_objetivo']}h/semana")
-                
-                with col2:
-                    if analisis['especialidades']:
-                        st.write(f"**🌟 Especialidades:**")
-                        for esp in analisis['especialidades']:
-                            rm_obj = next(rm for rm in st.session_state.roommates if rm.nombre == analisis['nombre'])
-                            nivel = rm_obj.habilidades[esp]
-                            st.write(f"• {esp} ({nivel}/10)")
-                    else:
-                        st.write("**🌟 Sin especialidades marcadas**")
-                
-                with col3:
-                    if analisis['debilidades']:
-                        st.write(f"**⚠️ Debilidades:**")
-                        for deb in analisis['debilidades']:
-                            rm_obj = next(rm for rm in st.session_state.roommates if rm.nombre == analisis['nombre'])
-                            nivel = rm_obj.habilidades[deb]
-                            st.write(f"• {deb} ({nivel}/10)")
-                    else:
-                        st.write("**✅ Sin debilidades marcadas**")
-                
-                # Mostrar restricciones si las hay
-                rm_obj = next(rm for rm in st.session_state.roommates if rm.nombre == analisis['nombre'])
-                if hasattr(rm_obj, 'restricciones_medicas') and rm_obj.restricciones_medicas:
-                    st.write(f"**🏥 Restricciones:** {len(rm_obj.restricciones_medicas)}")
-                
-                st.markdown("---")
-        
-        if st.button("✅ Entendido, ocultar resumen"):
-            st.session_state.demo_cargada = False
-            st.rerun()
-
 def mostrar_sidebar():
-    st.sidebar.title("🏠 ROOMIETASKAI")
-    st.sidebar.markdown("*Distribución Inteligente de Tareas (Mensual)*")
+    """Sidebar con navegación y estado del sistema"""
+    st.sidebar.markdown("""
+    <div style='background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                padding: 1rem; border-radius: 10px; margin-bottom: 1rem; text-align: center;'>
+        <h2 style='color: white; margin: 0; font-size: 1.5rem;'>🏠 ROOMIETASKAI</h2>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Navegación principal
+    st.sidebar.markdown("### 🧭 Navegación")
     
     paginas = {
         "🔧 Setup": pagina_setup,
-        "🎓 Patrones Estudiantiles": pagina_patrones_estudiantiles,
-        "🏥 Restricciones Médicas": pagina_restricciones_medicas,
-        "🏠 Espacio": pagina_espacio,
-        "🏖️ Ausencias": pagina_ausencias,
-        "🚨 Emergencias": pagina_emergencias,
+        "🎓 Patrones Estudiantiles": pagina_patrones,
         "🧠 Optimizar": pagina_optimizar,
-        "🗓️ Calendario Mensual": pagina_calendario_mensual,
-        "⚠️ Conflictos": pagina_analisis_conflictos,
-        "🔄 Intercambios": pagina_intercambios,
-        "📝 Feedback": pagina_feedback,
-        "🔄 Plan Rotación": pagina_plan_rotacion,
-        "📊 Análisis": pagina_analisis
+        "🗓️ Calendario": pagina_calendario,
+        "📊 Exportar": pagina_exportar
     }
     
-    pagina = st.sidebar.selectbox("Navegación", list(paginas.keys()), label_visibility="collapsed")
+    pagina_seleccionada = st.sidebar.selectbox(
+        "Ir a:",
+        list(paginas.keys()),
+        label_visibility="collapsed"
+    )
     
+    # Estado del sistema
     st.sidebar.markdown("---")
+    st.sidebar.markdown("### 📊 Estado del Sistema")
     
-    # Información del estado actual
-    st.sidebar.markdown(f"**Roommates:** {len(st.session_state.roommates)}")
-    if st.session_state.roommates and hasattr(st.session_state.roommates[0], 'restricciones_medicas'):
-        restricciones_totales = sum(len(rm.restricciones_medicas) for rm in st.session_state.roommates)
-        if restricciones_totales > 0:
-            st.sidebar.markdown(f"**Restricciones médicas:** {restricciones_totales}")
-    
-    st.sidebar.markdown(f"**Tareas:** {len(st.session_state.tareas)}")
-    
-    # Mostrar información del cronograma mensual si existe
-    if st.session_state.cronograma:
-        semanas_con_datos = set(asig['semana'] for asig in st.session_state.cronograma.values())
-        st.sidebar.markdown(f"**Semanas:** {len(semanas_con_datos)}/4")
-        
-        # Mostrar algoritmo utilizado
-        if st.session_state.usar_algoritmo_mejorado:
-            st.sidebar.markdown(f"**Estado:** ✅ Cronograma mejorado generado")
-        else:
-            st.sidebar.markdown(f"**Estado:** ✅ Cronograma básico generado")
-    else:
-        st.sidebar.markdown(f"**Estado:** ⏳ Sin cronograma")
-    
-    # Emergencias activas
-    if hasattr(st.session_state, 'emergencias_activas') and st.session_state.emergencias_activas:
-        emergencias_criticas = len([e for e in st.session_state.emergencias_activas if e.severidad == "critica"])
-        if emergencias_criticas > 0:
-            st.sidebar.error(f"🚨 Emergencias críticas: {emergencias_criticas}")
-        else:
-            st.sidebar.warning(f"⚠️ Emergencias activas: {len(st.session_state.emergencias_activas)}")
-    
-    # Controles principales
-    st.sidebar.markdown("---")
+    # Métricas del estado
     col1, col2 = st.sidebar.columns(2)
     with col1:
-        if st.button("🔄 Reset"):
-            for key in ['roommates', 'tareas', 'cronograma', 'fitness_historia', 'demo_cargada', 
-                       'sistema_feedback', 'emergencias_activas', 'intercambios_pendientes']:
-                if key == 'cronograma':
-                    st.session_state[key] = None
-                elif key == 'demo_cargada':
-                    st.session_state[key] = False
-                elif key in ['sistema_feedback']:
-                    st.session_state[key] = None
-                else:
-                    st.session_state[key] = []
+        st.metric("👥 Roommates", len(st.session_state.roommates))
+    with col2:
+        st.metric("📋 Tareas", len(st.session_state.tareas))
+    
+    # Estado del cronograma
+    if st.session_state.cronograma:
+        semanas_generadas = len(set(asig['semana'] for asig in st.session_state.cronograma.values()))
+        asignaciones_totales = len(st.session_state.cronograma)
+        
+        st.sidebar.success(f"✅ Cronograma generado")
+        st.sidebar.caption(f"📅 {semanas_generadas}/4 semanas • {asignaciones_totales} asignaciones")
+        
+        # Verificación rápida de cocina
+        tareas_cocina = sum(1 for asig in st.session_state.cronograma.values() 
+                           if any(t.nombre == asig['tarea'] and t.categoria == 'Cocina' 
+                                 for t in st.session_state.tareas))
+        if tareas_cocina > 0:
+            st.sidebar.caption(f"🍳 {tareas_cocina} asignaciones de cocina")
+    else:
+        st.sidebar.warning("⏳ Sin cronograma")
+    
+    # Estado del espacio
+    if hasattr(st.session_state, 'espacio') and st.session_state.espacio:
+        espacio = st.session_state.espacio
+        factor_complejidad = espacio.get_factor_rotacion_complejidad()
+        
+        st.sidebar.markdown("---")
+        st.sidebar.markdown("### 🏠 Espacio Configurado")
+        
+        col1, col2 = st.sidebar.columns(2)
+        with col1:
+            st.metric("🏠 Habitaciones", espacio.habitaciones)
+        with col2:
+            st.metric("🚿 Baños", espacio.banos)
+        
+        # Indicador de complejidad espacial
+        if factor_complejidad > 1.5:
+            st.sidebar.warning(f"🔴 Espacio complejo ({factor_complejidad:.1f}x)")
+        elif factor_complejidad > 1.2:
+            st.sidebar.info(f"🟡 Espacio moderado ({factor_complejidad:.1f}x)")
+        else:
+            st.sidebar.success(f"🟢 Espacio simple ({factor_complejidad:.1f}x)")
+    
+    # Controles rápidos
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### ⚡ Acciones Rápidas")
+    
+    col1, col2 = st.sidebar.columns(2)
+    
+    with col1:
+        if st.button("🔄 Reset", use_container_width=True, help="Reinicia todo el sistema"):
+            _reset_sistema()
             st.rerun()
     
     with col2:
-        if st.button("📝 Demo"):
-            num_roommates, num_tareas = cargar_datos_demo_simple()
-            st.sidebar.success(f"Demo: {num_roommates} roommates, {num_tareas} tareas")
+        if st.button("🎲 Demo", use_container_width=True, help="Carga datos de ejemplo"):
+            _cargar_demo_rapido()
             st.rerun()
     
-    # Configuración del algoritmo
-    with st.sidebar.expander("⚙️ Configuración"):
-        usar_mejorado = st.checkbox(
-            "Usar algoritmo mejorado",
-            value=st.session_state.usar_algoritmo_mejorado,
-            help="Incluye restricciones médicas, ausencias e incompatibilidades"
-        )
-        st.session_state.usar_algoritmo_mejorado = usar_mejorado
+    # Información adicional con consideración del espacio
+    if len(st.session_state.roommates) > 0 and len(st.session_state.tareas) > 0:
+        tiempo_total_semanal = sum(t.tiempo_estimado for t in st.session_state.tareas 
+                                  if t.frecuencia in ['diaria', 'semanal']) / 60
+        tiempo_disponible_total = sum(rm.tiempo_total_disponible for rm in st.session_state.roommates)
+        
+        # Ajustar por factor espacial si existe
+        if hasattr(st.session_state, 'espacio') and st.session_state.espacio:
+            factor_limpieza = st.session_state.espacio.get_factor_tiempo_limpieza()
+            tiempo_total_semanal *= factor_limpieza
+        
+        if tiempo_disponible_total > 0:
+            carga_sistema = min(100, (tiempo_total_semanal / tiempo_disponible_total) * 100)
+            
+            st.sidebar.markdown("---")
+            st.sidebar.markdown("### 📈 Carga del Sistema")
+            
+            if carga_sistema <= 60:
+                color = "🟢"
+                estado = "Óptima"
+            elif carga_sistema <= 80:
+                color = "🟡"
+                estado = "Moderada"
+            else:
+                color = "🔴"
+                estado = "Alta"
+            
+            st.sidebar.metric(
+                f"{color} Carga {estado}",
+                f"{carga_sistema:.0f}%",
+                help=f"Relación entre trabajo requerido y tiempo disponible (ajustado por espacio)"
+            )
     
-    return paginas[pagina]
+    return paginas[pagina_seleccionada]
 
+def _reset_sistema():
+    """Reinicia todo el sistema"""
+    for key in ['roommates', 'tareas', 'cronograma', 'fitness_historia']:
+        if key == 'cronograma':
+            st.session_state[key] = None
+        else:
+            st.session_state[key] = []
+    
+    # Mantener espacio por defecto
+    st.session_state.espacio = EspacioHogar()
+
+def _cargar_demo_rapido():
+    """Carga demo rápido para pruebas"""
+    from ui.setup import _cargar_demo_estudiantes_30min
+    _cargar_demo_estudiantes_30min()
+
+# Páginas de la aplicación
 def pagina_setup():
-    st.header("🔧 Configuración del Sistema")
-    mostrar_resumen_demo()
-    
-    ui = UIComponentsMejorado()
-    ui.mostrar_configuracion_roommates()
+    """Página de configuración"""
+    mostrar_setup()
 
-def pagina_patrones_estudiantiles():
-    st.header("🎓 Patrones de Horarios Estudiantiles")
+def pagina_patrones():
+    """Página de patrones estudiantiles"""
+    st.markdown("""
+    <div style='background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                padding: 2rem; border-radius: 15px; margin-bottom: 2rem; text-align: center;'>
+        <h1 style='color: white; margin: 0; font-size: 2.2rem;'>🎓 Patrones Estudiantiles</h1>
+        <p style='color: white; margin: 0.5rem 0 0 0; font-size: 1.1rem; opacity: 0.9;'>
+            Configuración rápida basada en tu estilo de vida universitario
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+    
     patron_aplicado = PatronesEstudiantiles.mostrar_selector_patrones()
     
     if patron_aplicado:
-        st.success(f"Patrón '{patron_aplicado['patron_nombre']}' listo para aplicar")
+        st.success(f"✅ Patrón '{patron_aplicado['patron_nombre']}' listo para aplicar")
         
         # Permitir aplicar a roommate existente o crear nuevo
         if st.session_state.roommates:
             aplicar_a = st.selectbox(
                 "Aplicar patrón a:",
-                ["Nuevo roommate"] + [rm.nombre for rm in st.session_state.roommates]
+                ["➕ Nuevo roommate"] + [f"🔄 {rm.nombre}" for rm in st.session_state.roommates]
             )
             
-            if aplicar_a != "Nuevo roommate":
-                if st.button("🔄 Actualizar Roommate Existente"):
-                    # Actualizar roommate existente
+            if aplicar_a.startswith("🔄"):
+                roommate_nombre = aplicar_a[2:]  # Remover emoji
+                if st.button("🔄 Actualizar Roommate Existente", type="primary"):
                     for rm in st.session_state.roommates:
-                        if rm.nombre == aplicar_a:
+                        if rm.nombre == roommate_nombre:
                             rm.horarios_disponibles = patron_aplicado['horarios']
                             rm.habilidades = patron_aplicado['habilidades']
                             rm.tiempo_total_disponible = patron_aplicado['tiempo_objetivo']
                             break
-                    st.success(f"Patrón aplicado a {aplicar_a}")
+                    st.success(f"✅ Patrón aplicado a {roommate_nombre}")
                     st.rerun()
+            
             else:
-                # Crear nuevo roommate con el patrón
-                st.write("### ➕ Crear Nuevo Roommate con Patrón")
-                nuevo_nombre = st.text_input("Nombre del nuevo roommate:")
+                # Crear nuevo roommate
+                nuevo_nombre = st.text_input("Nombre del nuevo roommate:", placeholder="Ej: María González")
                 
-                if nuevo_nombre and st.button("✅ Crear Roommate"):
+                if nuevo_nombre and st.button("✅ Crear Roommate con Patrón", type="primary"):
                     if nuevo_nombre.strip() not in [rm.nombre for rm in st.session_state.roommates]:
-                        nuevo_roommate = RoommateEnhanced(
+                        nuevo_roommate = Roommate(
                             nombre=nuevo_nombre.strip(),
                             horarios_disponibles=patron_aplicado['horarios'],
                             habilidades=patron_aplicado['habilidades'],
@@ -267,537 +232,481 @@ def pagina_patrones_estudiantiles():
                             tiempo_total_disponible=patron_aplicado['tiempo_objetivo']
                         )
                         st.session_state.roommates.append(nuevo_roommate)
-                        st.success(f"Roommate '{nuevo_nombre}' creado con patrón aplicado")
+                        st.success(f"✅ Roommate '{nuevo_nombre}' creado con patrón aplicado")
                         st.rerun()
                     else:
-                        st.error("Ya existe un roommate con ese nombre")
+                        st.error("❌ Ya existe un roommate con ese nombre")
+        else:
+            # No hay roommates, crear el primero
+            nuevo_nombre = st.text_input("Nombre del roommate:", placeholder="Ej: María González")
+            
+            if nuevo_nombre and st.button("✅ Crear Primer Roommate", type="primary"):
+                nuevo_roommate = Roommate(
+                    nombre=nuevo_nombre.strip(),
+                    horarios_disponibles=patron_aplicado['horarios'],
+                    habilidades=patron_aplicado['habilidades'],
+                    preferencias={cat: 'neutro' for cat in patron_aplicado['habilidades'].keys()},
+                    tiempo_total_disponible=patron_aplicado['tiempo_objetivo']
+                )
+                st.session_state.roommates.append(nuevo_roommate)
+                st.success(f"✅ Primer roommate '{nuevo_nombre}' creado")
+                st.rerun()
 
-def pagina_restricciones_medicas():
-    st.header("🏥 Gestión de Restricciones Médicas")
-    st.markdown("*Configura restricciones específicas para cada roommate*")
+def pagina_optimizar():
+    """Página de optimización con algoritmo genético"""
+    st.markdown("""
+    <div style='background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                padding: 2rem; border-radius: 15px; margin-bottom: 2rem; text-align: center;'>
+        <h1 style='color: white; margin: 0; font-size: 2.2rem;'>🧠 Optimización Inteligente</h1>
+        <p style='color: white; margin: 0.5rem 0 0 0; font-size: 1.1rem; opacity: 0.9;'>
+            Algoritmo genético con intervalos de 30 minutos y cocina generalizada
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
     
+    # Verificar prerequisitos
     if not st.session_state.roommates:
-        st.warning("Configura roommates primero")
+        st.error("❌ **Requisito faltante:** Configura al menos 1 roommate en la sección '🔧 Setup'")
         return
     
-    # Asegurar que todos los roommates sean RoommateEnhanced
-    roommates_enhanced = []
-    for rm in st.session_state.roommates:
-        if isinstance(rm, RoommateEnhanced):
-            roommates_enhanced.append(rm)
+    if not st.session_state.tareas:
+        st.error("❌ **Requisito faltante:** Configura al menos 1 tarea en la sección '🔧 Setup'")
+        return
+    
+    # Verificar tareas de cocina
+    tareas_cocina = [t for t in st.session_state.tareas if t.categoria == 'Cocina']
+    if not tareas_cocina:
+        st.warning("⚠️ **Recomendación:** Agrega tareas de cocina para cumplir el requisito diario")
+    
+    # Estado actual del sistema
+    st.markdown("### 📊 Estado Actual del Sistema")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("👥 Roommates", len(st.session_state.roommates))
+    
+    with col2:
+        st.metric("📋 Tareas", len(st.session_state.tareas))
+        st.caption(f"🍳 {len(tareas_cocina)} de cocina")
+    
+    with col3:
+        tiempo_total_semanal = sum(t.tiempo_estimado for t in st.session_state.tareas 
+                                  if t.frecuencia in ['diaria', 'semanal'])
+        intervalos_semanal = int(tiempo_total_semanal / 30)
+        st.metric("⏱️ Trabajo/Semana", f"{tiempo_total_semanal//60}h {tiempo_total_semanal%60}min")
+        st.caption(f"🕐 {intervalos_semanal} intervalos de 30min")
+    
+    with col4:
+        tiempo_disponible = sum(rm.tiempo_total_disponible for rm in st.session_state.roommates)
+        st.metric("🎯 Tiempo Disponible", f"{tiempo_disponible}h/semana")
+    
+    # ANÁLISIS DEL ESPACIO - NUEVA SECCIÓN
+    if hasattr(st.session_state, 'espacio') and st.session_state.espacio:
+        st.markdown("---")
+        st.markdown("### 🏠 Impacto del Espacio en la Optimización")
+        
+        espacio = st.session_state.espacio
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            factor_limpieza = espacio.get_factor_tiempo_limpieza()
+            color = "🟢" if factor_limpieza <= 1.2 else "🟡" if factor_limpieza <= 1.6 else "🔴"
+            st.metric(f"{color} Factor Limpieza", f"{factor_limpieza:.2f}x")
+            st.caption("Multiplica tiempo de limpieza")
+        
+        with col2:
+            factor_rotacion = espacio.get_factor_rotacion_complejidad()
+            color = "🟢" if factor_rotacion <= 1.3 else "🟡" if factor_rotacion <= 1.7 else "🔴"
+            st.metric(f"{color} Complejidad Rotación", f"{factor_rotacion:.2f}x")
+            st.caption("Aumenta diversidad requerida")
+        
+        with col3:
+            tareas_extra = len(espacio.generar_tareas_espaciales())
+            st.metric("➕ Tareas Extra", f"+{tareas_extra}")
+            st.caption("Generadas por el espacio")
+        
+        with col4:
+            # Calcular ahorro por equipamiento
+            ahorros = []
+            for cat in ['Limpieza', 'Cocina', 'Lavandería']:
+                factor = espacio.get_factor_equipamiento(cat)
+                if factor < 1.0:
+                    ahorros.append((1-factor)*100)
+            
+            if ahorros:
+                ahorro_promedio = sum(ahorros) / len(ahorros)
+                st.metric("⚡ Eficiencia Equipos", f"-{ahorro_promedio:.0f}%")
+                st.caption("Reducción de tiempo")
+            else:
+                st.metric("⚡ Eficiencia Equipos", "Estándar")
+                st.caption("Sin equipamiento especial")
+        
+        # Mostrar equipamiento configurado
+        if espacio.equipamiento:
+            with st.expander("🔧 Equipamiento Configurado", expanded=False):
+                cols = st.columns(min(4, len(espacio.equipamiento)))
+                for i, equipo in enumerate(espacio.equipamiento):
+                    with cols[i % len(cols)]:
+                        st.write(f"✅ {equipo}")
+    
+    else:
+        st.warning("⚠️ **Recomendación:** Configura las características del espacio en la sección '🏠 Espacio' para optimización completa")
+    
+    # Configuración del algoritmo
+    st.markdown("---")
+    st.markdown("### ⚙️ Configuración del Algoritmo")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("**Parámetros básicos:**")
+        poblacion = st.number_input("Población:", 20, 1000, 50, step=10, 
+                                   help="Número de soluciones a evaluar simultáneamente")
+        generaciones = st.number_input("Generaciones:", 10, 500, 30, step=5,
+                                     help="Número de iteraciones del algoritmo")
+    
+    with col2:
+        st.markdown("**Configuración avanzada:**")
+        
+        # Estimación de tiempo
+        complejidad = poblacion * generaciones
+        if complejidad > 5000:
+            tiempo_estimado = "2-3 minutos"
+            color_tiempo = "🔴"
+        elif complejidad > 2000:
+            tiempo_estimado = "1-2 minutos"
+            color_tiempo = "🟡"
         else:
-            # Convertir a RoommateEnhanced
-            rm_enhanced = RoommateEnhanced(
-                nombre=rm.nombre,
-                horarios_disponibles=rm.horarios_disponibles,
-                habilidades=rm.habilidades,
-                preferencias=rm.preferencias,
-                tiempo_total_disponible=rm.tiempo_total_disponible
-            )
-            roommates_enhanced.append(rm_enhanced)
+            tiempo_estimado = "< 1 minuto"
+            color_tiempo = "🟢"
+        
+        st.info(f"{color_tiempo} **Tiempo estimado:** {tiempo_estimado}")
+        st.caption(f"Complejidad: {complejidad:,} evaluaciones")
+        
+        # Impacto espacial en el tiempo
+        if hasattr(st.session_state, 'espacio') and st.session_state.espacio:
+            factor_espacial = st.session_state.espacio.get_factor_rotacion_complejidad()
+            if factor_espacial > 1.3:
+                st.caption(f"⚡ Espacio complejo: +{(factor_espacial-1)*100:.0f}% tiempo extra")
     
-    st.session_state.roommates = roommates_enhanced
+    # PESOS POR DEFECTO (CORREGIDO)
+    # Usar pesos por defecto ajustados por espacio
+    peso_equidad = 25
+    peso_compatibilidad = 25
+    peso_habilidades = 20
+    peso_cocina = 15
+    peso_preferencias = 10
     
-    tab1, tab2 = st.tabs(["➕ Agregar Restricción", "📋 Restricciones Existentes"])
+    # Peso dinámico de rotación espacial
+    if hasattr(st.session_state, 'espacio') and st.session_state.espacio:
+        factor_rotacion = st.session_state.espacio.get_factor_rotacion_complejidad()
+        peso_rotacion_espacial = int(5 * factor_rotacion)
+    else:
+        peso_rotacion_espacial = 5
     
-    with tab1:
-        # Formulario para agregar restricción
-        roommate_sel = st.selectbox(
-            "Roommate:",
-            [rm.nombre for rm in st.session_state.roommates]
-        )
+    # Pesos del algoritmo (opcional) - INDENTACIÓN CORREGIDA
+    with st.expander("🎛️ Ajustar Pesos del Algoritmo (Avanzado)", expanded=False):
+        st.markdown("Personaliza la importancia de cada factor en la optimización:")
         
         col1, col2 = st.columns(2)
         
         with col1:
-            categoria_tarea = st.selectbox(
-                "Categoría de tarea afectada:",
-                ['Limpieza', 'Cocina', 'Lavandería', 'Compras', 'Mantenimiento', 'Organización']
-            )
-            
-            tipo_restriccion = st.selectbox(
-                "Tipo de restricción:",
-                ['alergia', 'limitacion_fisica', 'medica', 'temporal']
-            )
+            peso_equidad = st.slider("⚖️ Equidad (distribución justa)", 0, 50, peso_equidad)
+            peso_compatibilidad = st.slider("⏰ Compatibilidad horarios", 0, 50, peso_compatibilidad)
+            peso_habilidades = st.slider("🎯 Habilidades", 0, 30, peso_habilidades)
         
         with col2:
-            severidad = st.selectbox(
-                "Severidad:",
-                ['prohibido', 'limitado', 'con_ayuda'],
-                help="Prohibido: No puede realizar, Limitado: Solo tareas fáciles, Con ayuda: Necesita asistencia"
-            )
+            peso_cocina = st.slider("🍳 Cocina diaria", 0, 30, peso_cocina)
+            peso_preferencias = st.slider("💝 Preferencias", 0, 20, peso_preferencias)
+            peso_rotacion_espacial = st.slider("🏠 Rotación espacial", 0, 20, peso_rotacion_espacial)
         
-        descripcion = st.text_area(
-            "Descripción detallada:",
-            placeholder="Ej: Alergia a productos de limpieza químicos, usar solo productos naturales..."
-        )
+        total_pesos = peso_equidad + peso_compatibilidad + peso_habilidades + peso_cocina + peso_preferencias + peso_rotacion_espacial
+        st.caption(f"Total de pesos: {total_pesos} (recomendado: 100)")
         
-        productos_prohibidos = st.text_input(
-            "Productos específicos prohibidos (separados por coma):",
-            placeholder="Ej: Cloro, Amoniaco, Detergente X"
-        )
-        
-        # Fechas para restricciones temporales
-        if tipo_restriccion == 'temporal':
-            col1, col2 = st.columns(2)
-            with col1:
-                fecha_inicio = st.date_input("Fecha inicio:", value=date.today())
-            with col2:
-                fecha_fin = st.date_input("Fecha fin:", value=date.today() + timedelta(days=30))
-        
-        if st.button("✅ Agregar Restricción", type="primary"):
-            if descripcion.strip():
-                roommate_obj = next(rm for rm in st.session_state.roommates if rm.nombre == roommate_sel)
-                
-                restriccion = RestriccionMedica(
-                    categoria_tarea=categoria_tarea,
-                    tipo_restriccion=tipo_restriccion,
-                    descripcion=descripcion,
-                    severidad=severidad,
-                    productos_prohibidos=productos_prohibidos.split(',') if productos_prohibidos else [],
-                    fecha_inicio=fecha_inicio if tipo_restriccion == 'temporal' else None,
-                    fecha_fin=fecha_fin if tipo_restriccion == 'temporal' else None
-                )
-                
-                roommate_obj.restricciones_medicas.append(restriccion)
-                st.success("Restricción médica agregada exitosamente")
-                st.rerun()
-            else:
-                st.error("Por favor, proporciona una descripción")
-    
-    with tab2:
-        # Mostrar restricciones existentes
-        st.write("### 📋 Restricciones Registradas")
-        
-        restricciones_encontradas = False
-        for roommate in st.session_state.roommates:
-            if hasattr(roommate, 'restricciones_medicas') and roommate.restricciones_medicas:
-                restricciones_encontradas = True
-                with st.expander(f"👤 {roommate.nombre} ({len(roommate.restricciones_medicas)} restricciones)"):
-                    for i, restriccion in enumerate(roommate.restricciones_medicas):
-                        col1, col2 = st.columns([3, 1])
-                        
-                        with col1:
-                            severidad_emoji = {
-                                'prohibido': '🚫',
-                                'limitado': '⚠️', 
-                                'con_ayuda': '🤝'
-                            }
-                            
-                            st.write(f"**{severidad_emoji[restriccion.severidad]} {restriccion.categoria_tarea}** - {restriccion.tipo_restriccion}")
-                            st.write(f"📝 {restriccion.descripcion}")
-                            
-                            if restriccion.productos_prohibidos:
-                                st.write(f"🚫 Productos prohibidos: {', '.join(restriccion.productos_prohibidos)}")
-                            
-                            if restriccion.fecha_inicio and restriccion.fecha_fin:
-                                st.write(f"📅 Temporal: {restriccion.fecha_inicio} - {restriccion.fecha_fin}")
-                                activa = restriccion.es_activa()
-                                st.write(f"Estado: {'🟢 Activa' if activa else '🔴 Inactiva'}")
-                        
-                        with col2:
-                            if st.button("🗑️ Eliminar", key=f"del_rest_{roommate.nombre}_{i}"):
-                                roommate.restricciones_medicas.pop(i)
-                                st.rerun()
-        
-        if not restricciones_encontradas:
-            st.info("No hay restricciones médicas registradas")
-
-def pagina_espacio():
-    st.header("🏠 Características del Espacio")
-    mostrar_resumen_demo()
-    
-    ui = UIComponentsMejorado()
-    ui.mostrar_configuracion_espacio()
-
-def pagina_ausencias():
-    st.header("🏖️ Gestión de Ausencias")
-    
-    if not st.session_state.roommates:
-        st.warning("Configura roommates primero")
-        return
-    
-    # Asegurar que todos los roommates sean RoommateEnhanced
-    roommates_enhanced = []
-    for rm in st.session_state.roommates:
-        if isinstance(rm, RoommateEnhanced):
-            roommates_enhanced.append(rm)
-        else:
-            rm_enhanced = RoommateEnhanced(
-                nombre=rm.nombre,
-                horarios_disponibles=rm.horarios_disponibles,
-                habilidades=rm.habilidades,
-                preferencias=rm.preferencias,
-                tiempo_total_disponible=rm.tiempo_total_disponible
-            )
-            roommates_enhanced.append(rm_enhanced)
-    
-    st.session_state.roommates = roommates_enhanced
-    
-    manager = ManagerAusencias(roommates_enhanced)
-    manager.mostrar_gestion_ausencias()
-
-def pagina_emergencias():
-    st.header("🚨 Gestión de Emergencias")
-    
-    if not st.session_state.roommates:
-        st.warning("Configura roommates primero")
-        return
-    
-    if not st.session_state.cronograma:
-        st.info("Ejecuta la optimización primero para poder redistribuir tareas")
-    
-    manager = ManagerEmergencias(
-        st.session_state.cronograma or {}, 
-        st.session_state.roommates
-    )
-    manager.mostrar_gestion_emergencias()
-
-def pagina_optimizar():
-    st.header("🧠 Optimización Mensual con Algoritmo Genético")
-    
-    if st.session_state.usar_algoritmo_mejorado:
-        st.markdown("*🔬 **Algoritmo Mejorado**: Considera restricciones médicas, ausencias, incompatibilidades y aprendizaje histórico*")
-    else:
-        st.markdown("*Genera cronogramas únicos para 4 semanas con intervalos de 30 minutos*")
-    
-    mostrar_resumen_demo()
-    
-    if not st.session_state.roommates or not st.session_state.tareas:
-        st.error("Configura roommates y tareas primero")
-        return
-    
-    # Verificar que hay tareas de cocina
-    tareas_cocina = [t for t in st.session_state.tareas if t.categoria == 'Cocina']
-    if not tareas_cocina:
-        st.warning("⚠️ No hay tareas de cocina configuradas. Se recomienda agregar tareas de cocina para cumplir el requisito diario.")
-    
-    # Mostrar información del sistema mejorado
-    if st.session_state.usar_algoritmo_mejorado:
-        restricciones_totales = 0
-        ausencias_totales = 0
-        if hasattr(st.session_state.roommates[0], 'restricciones_medicas'):
-            restricciones_totales = sum(len(rm.restricciones_medicas) for rm in st.session_state.roommates)
-            ausencias_totales = sum(len(rm.ausencias) for rm in st.session_state.roommates)
-        
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Roommates", len(st.session_state.roommates))
-        with col2:
-            st.metric("Restricciones Médicas", restricciones_totales)
-        with col3:
-            st.metric("Ausencias Registradas", ausencias_totales)
-        with col4:
-            tareas_cocina_count = len(tareas_cocina)
-            st.metric("Tareas de Cocina", tareas_cocina_count)
-            if tareas_cocina_count == 0:
-                st.caption("⚠️ Requeridas para cumplimiento diario")
-    else:
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Roommates", len(st.session_state.roommates))
-        with col2:
-            st.metric("Tareas", len(st.session_state.tareas))
-            st.caption(f"Cocina: {len(tareas_cocina)}")
-        with col3:
-            tiempo_total_mensual = sum(t.tiempo_estimado * t.get_repeticiones_semanales() * 4 for t in st.session_state.tareas)
-            st.metric("Tiempo Total Mensual", f"{tiempo_total_mensual//60}h {tiempo_total_mensual%60}min")
-    
-    st.subheader("Parámetros del Algoritmo")
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        poblacion = st.number_input("Población", 10, 1000, 50, step=10)
-        generaciones = st.number_input("Generaciones", 5, 200, 40, step=5)
-        
-        if st.session_state.usar_algoritmo_mejorado:
-            st.info("💡 **Algoritmo Mejorado**: Respeta restricciones médicas y ausencias automáticamente")
-        else:
-            st.info("💡 **Intervalos de 30 minutos**: El algoritmo programa tareas en intervalos de media hora para mayor precisión.")
-    
-    with col2:
-        with st.expander("Pesos de optimización"):
-            peso_equidad = st.slider("Equidad", 0, 100, 25)
-            peso_compatibilidad = st.slider("Compatibilidad", 0, 100, 25)
-            peso_habilidades = st.slider("Habilidades", 0, 100, 15)
-            peso_preferencias = st.slider("Preferencias", 0, 100, 10)
-            peso_rotacion = st.slider("Rotación entre semanas", 0, 100, 10)
-            peso_cocina = st.slider("Cocina diaria", 0, 100, 15)
-            
-            if st.session_state.usar_algoritmo_mejorado:
-                st.markdown("**Pesos del Algoritmo Mejorado:**")
-                peso_restricciones = st.slider("Restricciones médicas", 0, 100, 30)
-                peso_ausencias = st.slider("Ausencias", 0, 100, 25)
-                peso_aprendizaje = st.slider("Aprendizaje histórico", 0, 100, 15)
-                peso_incompatibilidades = st.slider("Incompatibilidades", 0, 100, 20)
-    
-    # Verificar si hay datos de aprendizaje
-    ajustes_aprendizaje = {}
-    if hasattr(st.session_state, 'sistema_feedback') and st.session_state.sistema_feedback:
-        ajustes_aprendizaje = st.session_state.sistema_feedback.get_ajustes_sugeridos()
-        
-        if ajustes_aprendizaje and any(ajustes_aprendizaje.values()):
-            st.success("🧠 **Sistema de aprendizaje activo**: Se aplicarán ajustes basados en experiencias previas")
-    
-    # Advertencias de complejidad
-    complejidad = poblacion * generaciones
-    if complejidad > 10000:
-        st.warning(f"⚠️ Configuración intensiva: {complejidad:,} evaluaciones. Tiempo estimado: 2-5 minutos.")
-    elif complejidad > 5000:
-        st.info(f"💡 Configuración moderada: {complejidad:,} evaluaciones. Tiempo estimado: 1-2 minutos.")
-    else:
-        st.success(f"✅ Configuración rápida: {complejidad:,} evaluaciones. Tiempo estimado: <1 minuto.")
+        if total_pesos != 100:
+            st.warning("⚠️ **Advertencia:** La suma de los pesos no es 100. Se aplicarán proporcionalmente.")
     
     # Botón de optimización
-    boton_texto = "🚀 Optimizar Cronograma Mensual Mejorado" if st.session_state.usar_algoritmo_mejorado else "🚀 Optimizar Cronograma Mensual"
+    st.markdown("---")
     
-    if st.button(boton_texto, type="primary"):
-        with st.spinner(f"Ejecutando algoritmo genético {'mejorado' if st.session_state.usar_algoritmo_mejorado else ''}..."):
+    if st.button("🚀 Generar Cronograma Mensual (30min)", type="primary", use_container_width=True):
+        with st.spinner("🧬 Ejecutando algoritmo genético con intervalos de 30 minutos..."):
             try:
-                if st.session_state.usar_algoritmo_mejorado:
-                    # Usar algoritmo mejorado
-                    ag = AlgoritmoGeneticoMejorado(
-                        st.session_state.roommates,
-                        st.session_state.tareas,
-                        poblacion,
-                        generaciones,
-                        ajustes_aprendizaje=ajustes_aprendizaje
-                    )
-                    
-                    # Ajustar pesos del algoritmo mejorado
-                    ag.ajustar_pesos(
-                        equidad=peso_equidad,
-                        compatibilidad=peso_compatibilidad,
-                        habilidades=peso_habilidades,
-                        preferencias=peso_preferencias,
-                        rotacion=peso_rotacion,
-                        cocina_diaria=peso_cocina,
-                        restricciones_medicas=peso_restricciones,
-                        ausencias=peso_ausencias,
-                        aprendizaje_historico=peso_aprendizaje,
-                        incompatibilidades=peso_incompatibilidades
-                    )
-                else:
-                    # Usar algoritmo original
-                    ag = AlgoritmoGeneticoOptimizado(
-                        st.session_state.roommates,
-                        st.session_state.tareas,
-                        poblacion,
-                        generaciones
-                    )
-                    
-                    ag.ajustar_pesos(
-                        equidad=peso_equidad,
-                        compatibilidad=peso_compatibilidad,
-                        habilidades=peso_habilidades,
-                        preferencias=peso_preferencias,
-                        rotacion=peso_rotacion,
-                        cocina_diaria=peso_cocina
-                    )
+                # Obtener espacio configurado
+                espacio = getattr(st.session_state, 'espacio', EspacioHogar())
                 
-                mejor, historia = ag.ejecutar()
+                # SOLUCIÓN TEMPORAL - CREAR ALGORITMO SIN PARÁMETRO ESPACIO
+                algoritmo = AlgoritmoGenetico(
+                    roommates=st.session_state.roommates,
+                    tareas=st.session_state.tareas,
+                    tam_poblacion=poblacion,
+                    generaciones=generaciones
+                )
                 
-                st.session_state.cronograma = mejor
-                st.session_state.fitness_historia = historia
+                # Aplicar espacio después de crear el algoritmo (si tiene los métodos)
+                if hasattr(algoritmo, 'espacio'):
+                    algoritmo.espacio = espacio
                 
-                algoritmo_usado = "mejorado" if st.session_state.usar_algoritmo_mejorado else "básico"
-                st.success(f"¡Optimización {algoritmo_usado} completada!")
+                # Aplicar pesos personalizados
+                algoritmo.pesos = {
+                    'equidad': peso_equidad,
+                    'compatibilidad': peso_compatibilidad,
+                    'habilidades': peso_habilidades,
+                    'cocina_diaria': peso_cocina,
+                    'preferencias': peso_preferencias,
+                    'rotacion_espacial': peso_rotacion_espacial
+                }
                 
-                # Métricas de resultado
-                if historia:
-                    fitness_inicial = historia[0]['mejor']
-                    fitness_final = historia[-1]['mejor'] 
-                    mejora = ((fitness_final - fitness_inicial) / fitness_inicial * 100) if fitness_inicial > 0 else 0
-                    
-                    col1, col2, col3, col4 = st.columns(4)
-                    with col1:
-                        st.metric("Fitness Inicial", f"{fitness_inicial:.3f}")
-                    with col2:
-                        st.metric("Fitness Final", f"{fitness_final:.3f}")
-                    with col3:
-                        st.metric("Mejora", f"{mejora:.1f}%")
-                    with col4:
-                        semanas_generadas = len(set(asig['semana'] for asig in mejor.values()))
-                        st.metric("Semanas", f"{semanas_generadas}/4")
+                # Ejecutar optimización
+                mejor_cronograma, historia_fitness = algoritmo.ejecutar()
                 
-                # Verificar cocina diaria
-                if tareas_cocina:
-                    dias_con_cocina = set()
-                    for asig in mejor.values():
-                        tarea_obj = next((t for t in st.session_state.tareas if t.nombre == asig['tarea']), None)
-                        if tarea_obj and tarea_obj.categoria == 'Cocina':
-                            dias_con_cocina.add(f"S{asig['semana']}_{asig['dia']}")
-                    
-                    cumplimiento_cocina = len(dias_con_cocina) / 28 * 100  # 28 días en 4 semanas
-                    
-                    if cumplimiento_cocina >= 90:
-                        st.success(f"🍳 Cocina diaria: {cumplimiento_cocina:.1f}% de cumplimiento")
-                    else:
-                        st.warning(f"🍳 Cocina diaria: {cumplimiento_cocina:.1f}% de cumplimiento (objetivo: 100%)")
+                # Guardar resultados
+                st.session_state.cronograma = mejor_cronograma
+                st.session_state.fitness_historia = historia_fitness
                 
-                # Verificar violaciones de restricciones si usa algoritmo mejorado
-                if st.session_state.usar_algoritmo_mejorado:
-                    violaciones = 0
-                    roommates_dict = {rm.nombre: rm for rm in st.session_state.roommates}
-                    tareas_dict = {t.nombre: t for t in st.session_state.tareas}
-                    
-                    for asig in mejor.values():
-                        roommate_obj = roommates_dict.get(asig['roommate'])
-                        tarea_obj = tareas_dict.get(asig['tarea'])
-                        
-                        if roommate_obj and tarea_obj and hasattr(roommate_obj, 'puede_realizar_tarea'):
-                            puede_realizar, motivo = roommate_obj.puede_realizar_tarea(tarea_obj)
-                            if not puede_realizar and "Restricción médica" in motivo:
-                                violaciones += 1
-                    
-                    if violaciones == 0:
-                        st.success("✅ Sin violaciones de restricciones médicas")
-                    else:
-                        st.warning(f"⚠️ {violaciones} posibles violaciones de restricciones detectadas")
+                st.success("🎉 ¡Cronograma generado exitosamente con intervalos de 30 minutos!")
                 
-                st.balloons()
+                # Mostrar resultados CON ANÁLISIS ESPACIAL
+                _mostrar_resultados_optimizacion_espacial(mejor_cronograma, historia_fitness, espacio)
                 
             except Exception as e:
-                st.error(f"Error en optimización: {e}")
-                import traceback
-                with st.expander("Detalles del error (para debugging)"):
-                    st.code(traceback.format_exc())
+                st.error(f"❌ Error durante la optimización: {str(e)}")
+                st.info("💡 Intenta con parámetros más conservadores (población: 30, generaciones: 20)")
+
+def _mostrar_resultados_optimizacion_espacial(cronograma: dict, historia: list, espacio: EspacioHogar):
+    """Muestra resultados incluyendo impacto espacial"""
+    st.markdown("### 🎯 Resultados de la Optimización")
     
-    # Mostrar progreso de optimización
-    if st.session_state.fitness_historia:
-        st.subheader("📈 Progreso de Optimización")
-        datos = st.session_state.fitness_historia
-        gen = [d['generacion'] for d in datos]
-        mejor = [d['mejor'] for d in datos]
-        promedio = [d['promedio'] for d in datos]
+    # Métricas principales
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("📋 Asignaciones", len(cronograma))
+    
+    with col2:
+        semanas_generadas = len(set(asig['semana'] for asig in cronograma.values()))
+        st.metric("📅 Semanas", f"{semanas_generadas}/4")
+    
+    with col3:
+        if historia:
+            fitness_final = historia[-1]['mejor']
+            st.metric("🎯 Fitness Final", f"{fitness_final:.3f}")
+        else:
+            st.metric("🎯 Fitness Final", "N/A")
+    
+    with col4:
+        tiempo_total = sum(asig['duracion'] for asig in cronograma.values())
+        intervalos_total = int(tiempo_total / 30)
+        st.metric("⏱️ Tiempo Total", f"{tiempo_total//60}h {tiempo_total%60}min")
+        st.caption(f"🕐 {intervalos_total} intervalos de 30min")
+    
+    # ANÁLISIS DEL IMPACTO ESPACIAL - NUEVA SECCIÓN
+    if hasattr(espacio, 'generar_tareas_espaciales'):
+        st.markdown("---")
+        st.markdown("### 🏠 Análisis del Impacto Espacial")
         
-        fig = px.line(x=gen, y=[mejor, promedio], 
-                     title="Evolución del Fitness (Cronograma Mensual)")
-        fig.update_layout(xaxis_title="Generación", yaxis_title="Fitness")
-        fig.data[0].name = "Mejor"
-        fig.data[1].name = "Promedio"
+        # Identificar tareas generadas por el espacio
+        tareas_espaciales_nombres = [t.nombre for t in espacio.generar_tareas_espaciales()]
+        tareas_espaciales = [asig for asig in cronograma.values() 
+                            if asig['tarea'] in tareas_espaciales_nombres]
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.metric("🏠 Tareas Espaciales", len(tareas_espaciales))
+            if tareas_espaciales:
+                tiempo_espacial = sum(asig['duracion'] for asig in tareas_espaciales)
+                st.caption(f"Tiempo: {tiempo_espacial//60}h {tiempo_espacial%60}min")
+        
+        with col2:
+            # Calcular eficiencias obtenidas
+            ahorros_reales = []
+            for categoria in ['Limpieza', 'Cocina', 'Lavandería']:
+                factor = espacio.get_factor_equipamiento(categoria)
+                if factor < 1.0:
+                    # Calcular tiempo ahorrado en esta categoría
+                    tareas_categoria = [asig for asig in cronograma.values() 
+                                      if any(t.nombre == asig['tarea'] and t.categoria == categoria 
+                                            for t in st.session_state.tareas)]
+                    tiempo_categoria = sum(asig['duracion'] for asig in tareas_categoria)
+                    ahorro = tiempo_categoria * (1 - factor)
+                    ahorros_reales.append(ahorro)
+            
+            if ahorros_reales:
+                ahorro_total = sum(ahorros_reales)
+                st.metric("⚡ Tiempo Ahorrado", f"{ahorro_total//60}h {int(ahorro_total%60)}min")
+                st.caption("Por equipamiento eficiente")
+            else:
+                st.metric("⚡ Tiempo Ahorrado", "0min")
+                st.caption("Sin equipamiento especial")
+        
+        with col3:
+            # Factor de complejidad aplicado
+            factor_rotacion = espacio.get_factor_rotacion_complejidad()
+            color_factor = "🟢" if factor_rotacion <= 1.3 else "🟡" if factor_rotacion <= 1.7 else "🔴"
+            st.metric(f"{color_factor} Factor Aplicado", f"{factor_rotacion:.2f}x")
+            st.caption("Complejidad espacial")
+    
+    # Verificación de cocina diaria
+    st.markdown("---")
+    st.markdown("### 🍳 Verificación de Cocina Diaria")
+    
+    tareas_cocina_asignadas = 0
+    dias_con_cocina = set()
+    
+    for asig in cronograma.values():
+        for tarea in st.session_state.tareas:
+            if tarea.nombre == asig['tarea'] and tarea.categoria == 'Cocina':
+                tareas_cocina_asignadas += 1
+                dias_con_cocina.add(f"S{asig['semana']}_{asig['dia']}")
+                break
+    
+    cumplimiento_cocina = (len(dias_con_cocina) / 28) * 100  # 28 días en 4 semanas
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric("🍳 Días con Cocina", f"{len(dias_con_cocina)}/28")
+    
+    with col2:
+        st.metric("📊 Cumplimiento", f"{cumplimiento_cocina:.0f}%")
+    
+    with col3:
+        if cumplimiento_cocina >= 90:
+            st.success("✅ Excelente cumplimiento")
+        elif cumplimiento_cocina >= 70:
+            st.warning("⚠️ Cumplimiento aceptable")
+        else:
+            st.error("❌ Cumplimiento deficiente")
+    
+    # Mostrar eficiencias específicas por categoría
+    if hasattr(espacio, 'get_factor_equipamiento'):
+        st.markdown("---")
+        st.markdown("### ⚡ Eficiencias por Equipamiento")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            factor_limpieza = espacio.get_factor_equipamiento('Limpieza')
+            if factor_limpieza < 1.0:
+                st.success(f"🧹 **Limpieza:** {(1-factor_limpieza)*100:.0f}% más eficiente")
+                if "Robot aspirador" in espacio.equipamiento:
+                    st.caption("🤖 Robot aspirador: -40% tiempo")
+                elif "Aspiradora" in espacio.equipamiento:
+                    st.caption("🌪️ Aspiradora: -20% tiempo")
+            else:
+                st.info("🧹 **Limpieza:** Tiempo estándar")
+        
+        with col2:
+            factor_cocina = espacio.get_factor_equipamiento('Cocina')
+            if factor_cocina < 1.0:
+                st.success(f"🍳 **Cocina:** {(1-factor_cocina)*100:.0f}% más eficiente")
+                if "Lavavajillas" in espacio.equipamiento:
+                    st.caption("🍽️ Lavavajillas: -50% tiempo")
+                if "Microondas" in espacio.equipamiento:
+                    st.caption("⚡ Microondas: -10% tiempo")
+            else:
+                st.info("🍳 **Cocina:** Tiempo estándar")
+        
+        with col3:
+            factor_lavanderia = espacio.get_factor_equipamiento('Lavandería')
+            if factor_lavanderia < 1.0:
+                st.success(f"👕 **Lavandería:** {(1-factor_lavanderia)*100:.0f}% más eficiente")
+                if "Secadora" in espacio.equipamiento:
+                    st.caption("🌪️ Secadora: -40% tiempo")
+                if "Lavadora" in espacio.equipamiento:
+                    st.caption("🌊 Lavadora: -30% tiempo")
+            else:
+                st.info("👕 **Lavandería:** Tiempo estándar")
+    
+    # Gráfico de evolución del fitness
+    if historia and len(historia) > 1:
+        st.markdown("---")
+        st.markdown("### 📈 Evolución del Algoritmo")
+        
+        df_historia = pd.DataFrame(historia)
+        
+        fig = px.line(df_historia, x='generacion', y=['mejor', 'promedio'],
+                     title="Evolución del Fitness Durante la Optimización con Intervalos 30min",
+                     labels={'value': 'Fitness', 'generacion': 'Generación'})
+        
+        fig.update_layout(height=400)
         st.plotly_chart(fig, use_container_width=True)
-
-def pagina_calendario_mensual():
-    st.header("🗓️ Calendario Mensual (4 Semanas)")
-    st.markdown("*Vista completa del cronograma mensual con intervalos de 30 minutos*")
-    
-    if not st.session_state.cronograma:
-        st.warning("Ejecuta la optimización primero para generar el cronograma mensual")
-        return
-    
-    # Agregar opciones de exportación al inicio
-    from calendar_views import mostrar_opciones_exportacion
-    mostrar_opciones_exportacion()
-    
-    st.divider()
-    
-    # Tipo de vista
-    tipo_vista = st.radio(
-        "Tipo de vista:",
-        ["🗓️ Calendario Visual", "⚠️ Calendario con Conflictos", "📊 Tabla Completa"],
-        horizontal=True
-    )
-    
-    if tipo_vista == "🗓️ Calendario Visual":
-        crear_calendario_mensual()
-    elif tipo_vista == "⚠️ Calendario con Conflictos":
-        crear_calendario_mensual_con_conflictos()
-    else:
-        mostrar_vista_tabla()
-
-def pagina_analisis_conflictos():
-    st.header("⚠️ Análisis Detallado de Conflictos")
-    st.markdown("*Detección y resolución de choques de horarios*")
-    
-    if not st.session_state.cronograma:
-        st.warning("Ejecuta la optimización primero")
-        return
-    
-    from conflict_detector import DetectorConflictos
-    
-    detector = DetectorConflictos(
-        st.session_state.cronograma,
-        st.session_state.roommates,
-        st.session_state.tareas
-    )
-    
-    conflictos, tipos = detector.mostrar_resumen_conflictos()
-    
-    if conflictos:
-        st.subheader("🔧 Sugerencias de Resolución")
         
-        with st.expander("💡 Estrategias para Resolver Conflictos", expanded=True):
-            st.write("**Opciones para reducir conflictos:**")
-            st.write("1. **Re-optimizar** con mayor peso en 'compatibilidad'")
-            st.write("2. **Ajustar horarios** de roommates con más disponibilidad")
-            st.write("3. **Dividir tareas largas** en bloques más pequeños")
-            st.write("4. **Cambiar frecuencias** de tareas menos críticas")
-            st.write("5. **Asignar más tiempo objetivo** por semana a roommates")
-        
-        # Botón para re-optimizar enfocado en conflictos
-        if st.button("🚀 Re-optimizar Priorizando Compatibilidad", type="primary"):
-            st.info("Ejecutando optimización con mayor peso en compatibilidad de horarios...")
-            # Aquí se podría implementar la re-optimización automática
+        # Estadísticas de mejora
+        mejora = ((historia[-1]['mejor'] - historia[0]['mejor']) / historia[0]['mejor'] * 100) if historia[0]['mejor'] > 0 else 0
+        st.caption(f"📊 Mejora del fitness: {mejora:.1f}% en {len(historia)} generaciones con optimización espacial y intervalos de 30min")
 
-def pagina_intercambios():
-    st.header("🔄 Sistema de Intercambio de Tareas")
-    
-    if not st.session_state.cronograma:
-        st.warning("Ejecuta la optimización primero")
-        return
-    
-    # Inicializar el sistema de intercambios en session_state si no existe
-    if 'intercambiador' not in st.session_state:
-        st.session_state.intercambiador = IntercambiadorTareas(
-            st.session_state.cronograma, 
-            st.session_state.roommates
-        )
-    
-    st.session_state.intercambiador.mostrar_sistema_intercambios()
+def pagina_calendario():
+    """Página del calendario"""
+    mostrar_calendario()
 
-def pagina_feedback():
-    st.header("📝 Sistema de Feedback y Aprendizaje")
-    
-    # Inicializar sistema de feedback si no existe
-    if not st.session_state.sistema_feedback:
-        st.session_state.sistema_feedback = SistemaFeedback()
-    
-    st.session_state.sistema_feedback.mostrar_sistema_feedback()
-
-def pagina_plan_rotacion():
-    st.header("🔄 Plan de Rotación Mensual")
-    
-    if not st.session_state.roommates or not st.session_state.tareas:
-        st.warning("Configura roommates y tareas primero")
-        return
-    
-    rotation_manager = RotationManager()
-    rotation_manager.mostrar_plan_rotacion()
-
-def pagina_analisis():
-    st.header("📊 Análisis Completo del Sistema")
-    
-    if not st.session_state.cronograma:
-        st.warning("Ejecuta la optimización primero")
-        return
-    
-    analysis = AnalysisComponents()
-    analysis.mostrar_analisis_completo()
+def pagina_exportar():
+    """Página de exportación"""
+    mostrar_exportacion()
 
 def main():
-    init_session()
+    """Función principal de la aplicación"""
+    # Inicializar estado
+    init_session_state()
     
-    st.title("🏠 ROOMIETASKAI")
-    st.markdown("### *Sistema Inteligente de Distribución de Tareas Domésticas - Versión Mejorada*")
+    # CSS personalizado
+    st.markdown("""
+    <style>
+    .main {
+        padding-top: 0rem;
+    }
     
-    if st.session_state.usar_algoritmo_mejorado:
-        st.markdown("🔬 **Modo Avanzado**: Restricciones médicas • Ausencias • Incompatibilidades • Aprendizaje automático")
-    else:
-        st.markdown("🕐 **Modo Básico**: Intervalos de 30 minutos • 4 semanas diferentes • Cocina garantizada diariamente")
+    .block-container {
+        padding-top: 1rem;
+        padding-bottom: 0rem;
+        padding-left: 5rem;
+        padding-right: 5rem;
+    }
     
+    .stMetric {
+        background-color: white;
+        border: 1px solid #ddd;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+    }
+    
+    .stAlert {
+        border-radius: 0.5rem;
+    }
+    
+    .stButton > button {
+        border-radius: 0.5rem;
+        border: none;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        font-weight: 600;
+    }
+    
+    .stButton > button:hover {
+        background: linear-gradient(135deg, #5a6fd8 0%, #6a4190 100%);
+        transform: translateY(-1px);
+        box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    # Mostrar aplicación
     pagina_ejecutar = mostrar_sidebar()
+    
+    # Ejecutar página seleccionada
     pagina_ejecutar()
+    
+    # Footer
+    st.markdown("---")
+    st.markdown("""
+    <div style='text-align: center; color: #6c757d; padding: 1rem;'>
+        <p>🏠 <strong>ROOMIETASKAI </strong> • Sistema con Intervalos de 30 Minutos</p>
+        <p style='font-size: 0.8rem;'>Algoritmo genético optimizado para horarios realistas y cocina generalizada</p>
+    </div>
+    """, unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()

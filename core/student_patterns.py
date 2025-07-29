@@ -1,14 +1,12 @@
 import streamlit as st
 from typing import Dict, Optional
-from models import RangoTiempo
+from models import RangoTiempo, Roommate
 import plotly.graph_objects as go
 
 class PatronesEstudiantiles:
-    """Patrones de horarios típicos para estudiantes"""
     
     @staticmethod
     def get_patrones_predefinidos() -> Dict[str, Dict]:
-        """Patrones de horario optimizados para diferentes tipos de estudiantes"""
         return {
             "🌅 Estudiante Matutino": {
                 "descripcion": "Clases temprano, tardes libres",
@@ -107,29 +105,33 @@ class PatronesEstudiantiles:
         }
     
     @staticmethod
-    def mostrar_selector_patrones() -> Optional[Dict]:
-        """Interfaz para seleccionar y personalizar patrones"""
+    def mostrar_interfaz_completa():
         st.markdown("""
         <div style='background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); 
                     padding: 1rem; border-radius: 10px; margin-bottom: 1rem;'>
             <h3 style='color: white; margin: 0;'>🎓 Patrones de Horarios Estudiantiles</h3>
             <p style='color: white; margin: 0; opacity: 0.9;'>
-                Selecciona un patrón que se adapte a tu estilo de vida universitario
+                Crea roommates automáticamente con patrones optimizados para estudiantes
             </p>
         </div>
         """, unsafe_allow_html=True)
         
+        # Inicializar session state para patrones
+        if 'patron_seleccionado' not in st.session_state:
+            st.session_state.patron_seleccionado = None
+        
         patrones = PatronesEstudiantiles.get_patrones_predefinidos()
         
         # Selector visual de patrones
-        patron_seleccionado = st.selectbox(
+        patron_key = st.selectbox(
             "Selecciona tu patrón de estudiante:",
             list(patrones.keys()),
             format_func=lambda x: f"{x} - {patrones[x]['descripcion']}",
-            key="selector_patron"
+            key="selector_patron_estudiante"
         )
         
-        patron = patrones[patron_seleccionado]
+        patron = patrones[patron_key]
+        st.session_state.patron_seleccionado = patron
         
         # Vista previa del patrón
         col1, col2 = st.columns([2, 1])
@@ -146,20 +148,146 @@ class PatronesEstudiantiles:
                 "Horas objetivo por semana:", 
                 5, 25, 
                 patron['tiempo_objetivo'],
+                key="tiempo_patron_estudiante",
                 help="Cantidad de horas que puedes dedicar a tareas domésticas"
             )
+            patron['tiempo_objetivo'] = tiempo_personalizado
         
-        # Aplicar patrón
-        if st.button("✅ Aplicar Patrón Estudiantil", type="primary", use_container_width=True):
-            return {
-                'horarios': patron['horarios'],
-                'tiempo_objetivo': tiempo_personalizado if 'tiempo_personalizado' in locals() else patron['tiempo_objetivo'],
-                'habilidades': patron['habilidades'],
-                'patron_nombre': patron_seleccionado,
-                'patron_color': patron['color']
-            }
+        # Sección de creación de roommate
+        st.markdown("---")
+        st.markdown("### 👤 Crear Roommate con este Patrón")
+        
+        # Input para nombre
+        nombre_nuevo = st.text_input(
+            "Nombre del roommate:", 
+            placeholder="Ej: María González",
+            key="nombre_nuevo_estudiante"
+        )
+        
+        # Verificar si ya existe
+        nombres_existentes = [rm.nombre for rm in st.session_state.roommates]
+        
+        if nombre_nuevo:
+            if nombre_nuevo.strip() in nombres_existentes:
+                st.error(f"❌ Ya existe un roommate con el nombre '{nombre_nuevo}'")
+            else:
+                st.success(f"✅ Nombre '{nombre_nuevo}' disponible")
+                
+                # Botón para crear
+                if st.button(
+                    f"🎓 Crear {nombre_nuevo} como {patron_key}", 
+                    type="primary", 
+                    use_container_width=True,
+                    key="crear_roommate_estudiante"
+                ):
+                    return PatronesEstudiantiles._crear_roommate_con_patron(
+                        nombre_nuevo.strip(), 
+                        patron_key, 
+                        patron
+                    )
+        
+        # Opción para actualizar roommate existente
+        if st.session_state.roommates:
+            st.markdown("---")
+            st.markdown("### 🔄 O actualizar roommate existente")
+            
+            roommate_actualizar = st.selectbox(
+                "Seleccionar roommate para actualizar:",
+                options=[None] + st.session_state.roommates,
+                format_func=lambda x: "Seleccionar..." if x is None else f"🔄 {x.nombre}",
+                key="roommate_actualizar_estudiante"
+            )
+            
+            if roommate_actualizar:
+                if st.button(
+                    f"🔄 Actualizar {roommate_actualizar.nombre} con {patron_key}",
+                    type="secondary",
+                    use_container_width=True,
+                    key="actualizar_roommate_estudiante"
+                ):
+                    return PatronesEstudiantiles._actualizar_roommate_con_patron(
+                        roommate_actualizar, 
+                        patron_key, 
+                        patron
+                    )
         
         return None
+    
+    @staticmethod
+    def _crear_roommate_con_patron(nombre: str, patron_key: str, patron: Dict) -> bool:
+        """Crea un nuevo roommate con el patrón seleccionado"""
+        try:
+            nuevo_roommate = Roommate(
+                nombre=nombre,
+                horarios_disponibles=patron['horarios'],
+                habilidades=patron['habilidades'],
+                preferencias={cat: 'neutro' for cat in patron['habilidades'].keys()},
+                tiempo_total_disponible=patron['tiempo_objetivo']
+            )
+            
+            st.session_state.roommates.append(nuevo_roommate)
+            
+            st.success(f"🎉 ¡Roommate '{nombre}' creado exitosamente!")
+            st.info(f"✨ Patrón aplicado: **{patron_key}**")
+            
+            # Mostrar resumen
+            with st.expander("📊 Resumen del roommate creado", expanded=True):
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.markdown("**⏰ Horarios configurados:**")
+                    for dia, rangos in patron['horarios'].items():
+                        horas_dia = sum(r.duracion_horas() for r in rangos)
+                        st.write(f"• **{dia}:** {horas_dia:.1f}h disponibles")
+                
+                with col2:
+                    st.markdown("**🎯 Habilidades asignadas:**")
+                    for categoria, nivel in patron['habilidades'].items():
+                        st.write(f"• **{categoria}:** {nivel}/10")
+                
+                st.markdown(f"**📈 Tiempo objetivo:** {patron['tiempo_objetivo']} horas/semana")
+            
+            # Limpiar inputs
+            for key in ['nombre_nuevo_estudiante', 'tiempo_patron_estudiante']:
+                if key in st.session_state:
+                    del st.session_state[key]
+            
+            return True
+            
+        except Exception as e:
+            st.error(f"❌ Error al crear roommate: {str(e)}")
+            return False
+    
+    @staticmethod
+    def _actualizar_roommate_con_patron(roommate: Roommate, patron_key: str, patron: Dict) -> bool:
+        """Actualiza un roommate existente con el patrón seleccionado"""
+        try:
+            # Guardar nombre original
+            nombre_original = roommate.nombre
+            
+            # Actualizar atributos
+            roommate.horarios_disponibles = patron['horarios']
+            roommate.habilidades = patron['habilidades']
+            roommate.tiempo_total_disponible = patron['tiempo_objetivo']
+            
+            st.success(f"🔄 ¡Roommate '{nombre_original}' actualizado exitosamente!")
+            st.info(f"✨ Nuevo patrón aplicado: **{patron_key}**")
+            
+            # Mostrar cambios
+            with st.expander("📊 Cambios aplicados", expanded=True):
+                st.markdown(f"**👤 Roommate:** {nombre_original}")
+                st.markdown(f"**🎓 Nuevo patrón:** {patron_key}")
+                st.markdown(f"**⏰ Tiempo objetivo:** {patron['tiempo_objetivo']} horas/semana")
+                
+                st.markdown("**🎯 Habilidades actualizadas:**")
+                for categoria, nivel in patron['habilidades'].items():
+                    st.write(f"• **{categoria}:** {nivel}/10")
+            
+            return True
+            
+        except Exception as e:
+            st.error(f"❌ Error al actualizar roommate: {str(e)}")
+            return False
     
     @staticmethod
     def _mostrar_vista_previa_horarios(patron: Dict):
@@ -231,10 +359,31 @@ class PatronesEstudiantiles:
             st.write("• Perfil equilibrado")
     
     @staticmethod
+    def mostrar_selector_rapido():
+        """Selector rápido para usar en otras páginas"""
+        if 'patron_rapido_aplicado' not in st.session_state:
+            st.session_state.patron_rapido_aplicado = False
+        
+        with st.expander("🎓 Aplicar Patrón Estudiantil Rápido", expanded=False):
+            patrones = PatronesEstudiantiles.get_patrones_predefinidos()
+            
+            patron_key = st.selectbox(
+                "Patrón:",
+                list(patrones.keys()),
+                key="patron_rapido_select"
+            )
+            
+            nombre = st.text_input("Nombre:", key="patron_rapido_nombre")
+            
+            if nombre and st.button("Aplicar", key="patron_rapido_btn"):
+                patron = patrones[patron_key]
+                if PatronesEstudiantiles._crear_roommate_con_patron(nombre, patron_key, patron):
+                    st.session_state.patron_rapido_aplicado = True
+                    st.rerun()
+    
+    @staticmethod
     def get_patron_recomendado_por_disponibilidad(horas_disponibles: float) -> str:
         """Recomienda patrón basado en disponibilidad"""
-        patrones = PatronesEstudiantiles.get_patrones_predefinidos()
-        
         if horas_disponibles >= 50:
             return "⚡ Estudiante Flexible"
         elif horas_disponibles >= 30:

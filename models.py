@@ -33,9 +33,9 @@ class Roommate:
     """Roommate con horarios, habilidades y restricciones básicas"""
     nombre: str
     horarios_disponibles: Dict[str, List[RangoTiempo]]
-    habilidades: Dict[str, int]  # 1-10 por categoría
-    preferencias: Dict[str, str]  # 'prefiere', 'neutro', 'evita'
-    tiempo_total_disponible: int  # horas/semana objetivo
+    habilidades: Dict[str, int] 
+    preferencias: Dict[str, str] 
+    tiempo_total_disponible: int 
     restricciones_medicas: List[str] = field(default_factory=list)
     ausencias_activas: List[str] = field(default_factory=list)
     
@@ -110,7 +110,7 @@ class TareasPredeterminadas:
             Tarea("Limpiar cocina", "diaria", 30, 4, "Cocina"),
             
             # LIMPIEZA
-            Tarea("Aspirar", "semanal", 60, 3, "Limpieza"),
+            Tarea("Barrer", "semanal", 60, 3, "Limpieza"),
             Tarea("Trapear", "semanal", 60, 4, "Limpieza"),
             Tarea("Limpiar baños", "semanal", 90, 6, "Limpieza"),
             Tarea("Sacudir muebles", "semanal", 30, 2, "Limpieza"),

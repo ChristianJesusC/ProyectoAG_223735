@@ -2,8 +2,6 @@ import streamlit as st
 import plotly.express as px
 import pandas as pd
 from datetime import date
-
-# Importaciones del sistema
 from models import Roommate, Tarea, TareasPredeterminadas, EspacioHogar
 from core.genetic_algorithm import AlgoritmoGenetico
 from core.student_patterns import PatronesEstudiantiles
@@ -11,7 +9,6 @@ from ui.setup import mostrar_setup
 from ui.calendar import mostrar_calendario
 from ui.export import mostrar_exportacion
 
-# Configuración de la página
 st.set_page_config(
     page_title="ROOMIETASKAI",
     page_icon="🏠",
@@ -26,7 +23,7 @@ def init_session_state():
         'tareas': [],
         'cronograma': None,
         'fitness_historia': [],
-        'espacio': EspacioHogar(),  # Espacio por defecto
+        'espacio': EspacioHogar(),
         'version': '2.0'
     }
     
@@ -35,7 +32,6 @@ def init_session_state():
             st.session_state[key] = value
 
 def mostrar_sidebar():
-    """Sidebar con navegación y estado del sistema"""
     st.sidebar.markdown("""
     <div style='background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
                 padding: 1rem; border-radius: 10px; margin-bottom: 1rem; text-align: center;'>
@@ -43,12 +39,10 @@ def mostrar_sidebar():
     </div>
     """, unsafe_allow_html=True)
     
-    # Navegación principal
     st.sidebar.markdown("### 🧭 Navegación")
     
     paginas = {
         "🔧 Setup": pagina_setup,
-        "🎓 Patrones Estudiantiles": pagina_patrones,
         "🧠 Optimizar": pagina_optimizar,
         "🗓️ Calendario": pagina_calendario,
         "📊 Exportar": pagina_exportar
@@ -183,7 +177,7 @@ def pagina_setup():
     mostrar_setup()
 
 def pagina_patrones():
-    """Página de patrones estudiantiles"""
+    """Página de patrones estudiantiles - CORREGIDA"""
     st.markdown("""
     <div style='background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
                 padding: 2rem; border-radius: 15px; margin-bottom: 2rem; text-align: center;'>
@@ -194,63 +188,107 @@ def pagina_patrones():
     </div>
     """, unsafe_allow_html=True)
     
-    patron_aplicado = PatronesEstudiantiles.mostrar_selector_patrones()
-    
-    if patron_aplicado:
-        st.success(f"✅ Patrón '{patron_aplicado['patron_nombre']}' listo para aplicar")
+    try:
+        patron_aplicado = PatronesEstudiantiles.mostrar_interfaz_completa()
         
-        # Permitir aplicar a roommate existente o crear nuevo
-        if st.session_state.roommates:
-            aplicar_a = st.selectbox(
-                "Aplicar patrón a:",
-                ["➕ Nuevo roommate"] + [f"🔄 {rm.nombre}" for rm in st.session_state.roommates]
-            )
+        if patron_aplicado and isinstance(patron_aplicado, dict):
             
-            if aplicar_a.startswith("🔄"):
-                roommate_nombre = aplicar_a[2:]  # Remover emoji
-                if st.button("🔄 Actualizar Roommate Existente", type="primary"):
-                    for rm in st.session_state.roommates:
-                        if rm.nombre == roommate_nombre:
-                            rm.horarios_disponibles = patron_aplicado['horarios']
-                            rm.habilidades = patron_aplicado['habilidades']
-                            rm.tiempo_total_disponible = patron_aplicado['tiempo_objetivo']
-                            break
-                    st.success(f"✅ Patrón aplicado a {roommate_nombre}")
-                    st.rerun()
+            patron_nombre = patron_aplicado.get('patron_nombre', 'Patrón Estudiantil')
+            st.success(f"✅ Patrón '{patron_nombre}' listo para aplicar")
+            
+            if not all(key in patron_aplicado for key in ['horarios', 'habilidades', 'tiempo_objetivo']):
+                st.error("❌ El patrón seleccionado no tiene la estructura correcta")
+                st.info("💡 Intenta seleccionar otro patrón o usar configuración manual")
+                return
+            
+            # Permitir aplicar a roommate existente o crear nuevo
+            if st.session_state.roommates:
+                aplicar_a = st.selectbox(
+                    "Aplicar patrón a:",
+                    ["➕ Nuevo roommate"] + [f"🔄 {rm.nombre}" for rm in st.session_state.roommates]
+                )
+                
+                if aplicar_a.startswith("🔄"):
+                    roommate_nombre = aplicar_a[2:]  # Remover emoji
+                    if st.button("🔄 Actualizar Roommate Existente", type="primary"):
+                        try:
+                            for rm in st.session_state.roommates:
+                                if rm.nombre == roommate_nombre:
+                                    rm.horarios_disponibles = patron_aplicado.get('horarios', {})
+                                    rm.habilidades = patron_aplicado.get('habilidades', {})
+                                    rm.tiempo_total_disponible = patron_aplicado.get('tiempo_objetivo', 15)
+                                    break
+                            st.success(f"✅ Patrón aplicado a {roommate_nombre}")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ Error al actualizar roommate: {str(e)}")
+                
+                else:
+                    # Crear nuevo roommate
+                    nuevo_nombre = st.text_input("Nombre del nuevo roommate:", placeholder="Ej: María González")
+                    
+                    if nuevo_nombre and st.button("✅ Crear Roommate con Patrón", type="primary"):
+                        if nuevo_nombre.strip() not in [rm.nombre for rm in st.session_state.roommates]:
+                            try:
+                                nuevo_roommate = Roommate(
+                                    nombre=nuevo_nombre.strip(),
+                                    horarios_disponibles=patron_aplicado.get('horarios', {}),
+                                    habilidades=patron_aplicado.get('habilidades', {
+                                        'Limpieza': 5, 'Cocina': 5, 'Lavandería': 5, 
+                                        'Compras': 5, 'Mantenimiento': 5, 'Organización': 5
+                                    }),
+                                    preferencias={cat: 'neutro' for cat in patron_aplicado.get('habilidades', {}).keys()},
+                                    tiempo_total_disponible=patron_aplicado.get('tiempo_objetivo', 15)
+                                )
+                                st.session_state.roommates.append(nuevo_roommate)
+                                st.success(f"✅ Roommate '{nuevo_nombre}' creado con patrón aplicado")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ Error al crear roommate: {str(e)}")
+                        else:
+                            st.error("❌ Ya existe un roommate con ese nombre")
             
             else:
-                # Crear nuevo roommate
-                nuevo_nombre = st.text_input("Nombre del nuevo roommate:", placeholder="Ej: María González")
+                # No hay roommates, crear el primero
+                nuevo_nombre = st.text_input("Nombre del roommate:", placeholder="Ej: María González")
                 
-                if nuevo_nombre and st.button("✅ Crear Roommate con Patrón", type="primary"):
-                    if nuevo_nombre.strip() not in [rm.nombre for rm in st.session_state.roommates]:
+                if nuevo_nombre and st.button("✅ Crear Primer Roommate", type="primary"):
+                    try:
                         nuevo_roommate = Roommate(
                             nombre=nuevo_nombre.strip(),
-                            horarios_disponibles=patron_aplicado['horarios'],
-                            habilidades=patron_aplicado['habilidades'],
-                            preferencias={cat: 'neutro' for cat in patron_aplicado['habilidades'].keys()},
-                            tiempo_total_disponible=patron_aplicado['tiempo_objetivo']
+                            horarios_disponibles=patron_aplicado.get('horarios', {}),
+                            habilidades=patron_aplicado.get('habilidades', {
+                                'Limpieza': 5, 'Cocina': 5, 'Lavandería': 5, 
+                                'Compras': 5, 'Mantenimiento': 5, 'Organización': 5
+                            }),
+                            preferencias={cat: 'neutro' for cat in patron_aplicado.get('habilidades', {}).keys()},
+                            tiempo_total_disponible=patron_aplicado.get('tiempo_objetivo', 15)
                         )
                         st.session_state.roommates.append(nuevo_roommate)
-                        st.success(f"✅ Roommate '{nuevo_nombre}' creado con patrón aplicado")
+                        st.success(f"✅ Primer roommate '{nuevo_nombre}' creado")
                         st.rerun()
-                    else:
-                        st.error("❌ Ya existe un roommate con ese nombre")
+                    except Exception as e:
+                        st.error(f"❌ Error al crear primer roommate: {str(e)}")
+        
         else:
-            # No hay roommates, crear el primero
-            nuevo_nombre = st.text_input("Nombre del roommate:", placeholder="Ej: María González")
+            st.info("👆 Selecciona un patrón estudiantil arriba para comenzar")
             
-            if nuevo_nombre and st.button("✅ Crear Primer Roommate", type="primary"):
-                nuevo_roommate = Roommate(
-                    nombre=nuevo_nombre.strip(),
-                    horarios_disponibles=patron_aplicado['horarios'],
-                    habilidades=patron_aplicado['habilidades'],
-                    preferencias={cat: 'neutro' for cat in patron_aplicado['habilidades'].keys()},
-                    tiempo_total_disponible=patron_aplicado['tiempo_objetivo']
-                )
-                st.session_state.roommates.append(nuevo_roommate)
-                st.success(f"✅ Primer roommate '{nuevo_nombre}' creado")
-                st.rerun()
+            # ✅ OPCIÓN ALTERNATIVA
+            with st.expander("🔧 ¿Problemas con los patrones? Usa configuración manual"):
+                st.markdown("""
+                Si los patrones estudiantiles no funcionan correctamente:
+                1. Ve a la sección **🔧 Setup**
+                2. Selecciona **✏️ Crear Manualmente**  
+                3. Configura tu roommate paso a paso
+                """)
+    
+    except Exception as e:
+        st.error(f"❌ Error en la página de patrones: {str(e)}")
+        st.info("💡 Intenta usar la configuración manual en la sección '🔧 Setup'")
+        
+        if st.button("🔄 Ir a Configuración Manual", type="primary"):
+            st.session_state.pagina_actual = "🔧 Setup"
+            st.rerun()
 
 def pagina_optimizar():
     """Página de optimización con algoritmo genético"""
@@ -417,16 +455,12 @@ def pagina_optimizar():
             peso_habilidades = st.slider("🎯 Habilidades", 0, 30, peso_habilidades)
         
         with col2:
-            peso_cocina = st.slider("🍳 Cocina diaria", 0, 30, peso_cocina)
             peso_preferencias = st.slider("💝 Preferencias", 0, 20, peso_preferencias)
             peso_rotacion_espacial = st.slider("🏠 Rotación espacial", 0, 20, peso_rotacion_espacial)
         
         total_pesos = peso_equidad + peso_compatibilidad + peso_habilidades + peso_cocina + peso_preferencias + peso_rotacion_espacial
         st.caption(f"Total de pesos: {total_pesos} (recomendado: 100)")
         
-        if total_pesos != 100:
-            st.warning("⚠️ **Advertencia:** La suma de los pesos no es 100. Se aplicarán proporcionalmente.")
-    
     # Botón de optimización
     st.markdown("---")
     

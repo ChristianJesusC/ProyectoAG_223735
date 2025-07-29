@@ -80,7 +80,7 @@ def _formulario_roommate_con_patron():
     """Formulario usando patrones estudiantiles"""
     st.markdown("#### 🎓 Crear Roommate con Patrón Estudiantil")
     
-    patron_aplicado = PatronesEstudiantiles.mostrar_selector_patrones()
+    patron_aplicado = PatronesEstudiantiles.mostrar_interfaz_completa()
     
     if patron_aplicado:
         nombre = st.text_input("Nombre del roommate:", placeholder="Ej: María González")
@@ -725,7 +725,6 @@ def _get_tareas_esenciales_generalizadas():
     return [
         # COCINA GENERALIZADA
         Tarea("Preparar comida", "diaria", 60, 5, "Cocina"),
-        Tarea("Cocinar", "diaria", 90, 6, "Cocina"), 
         Tarea("Lavar platos", "diaria", 30, 3, "Cocina"),
         Tarea("Limpiar cocina", "diaria", 30, 4, "Cocina"),
         
@@ -737,7 +736,6 @@ def _get_tareas_esenciales_generalizadas():
         
         # LAVANDERÍA
         Tarea("Lavar ropa", "semanal", 120, 3, "Lavandería"),
-        Tarea("Tender ropa", "semanal", 30, 2, "Lavandería"),
         
         # COMPRAS
         Tarea("Comprar comestibles", "semanal", 90, 4, "Compras"),
@@ -755,7 +753,6 @@ def _get_tareas_extras_generalizadas():
         Tarea("Organizar despensa", "mensual", 60, 4, "Organización")
     ]
 
-# RESTO DE FUNCIONES SIN CAMBIOS MAYORES...
 def _configuracion_tareas_personalizada():
     """Configuración personalizada de tareas"""
     st.markdown("#### ✏️ Configuración Personalizada")

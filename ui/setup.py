@@ -729,7 +729,7 @@ def _get_tareas_esenciales_generalizadas():
         Tarea("Limpiar cocina", "diaria", 30, 4, "Cocina"),
         
         # LIMPIEZA
-        Tarea("Aspirar", "semanal", 60, 3, "Limpieza"),
+        Tarea("Barrer", "diaria", 30, 2, "Limpieza"),
         Tarea("Trapear", "semanal", 60, 4, "Limpieza"),
         Tarea("Limpiar baños", "semanal", 90, 6, "Limpieza"),
         Tarea("Sacudir muebles", "semanal", 30, 2, "Limpieza"),
@@ -976,30 +976,57 @@ def _mostrar_tareas_configuradas():
         _lista_tareas_detallada()
 
 def _lista_tareas_detallada():
-    """Lista detallada de tareas"""
-    for i, tarea in enumerate(st.session_state.tareas):
-        col1, col2 = st.columns([4, 1])
-        
-        with col1:
-            categoria_emoji = {
-                'Cocina': '🍳', 'Limpieza': '🧹', 'Lavandería': '👕',
-                'Compras': '🛒', 'Mantenimiento': '🔧', 'Organización': '📦'
-            }
-            emoji = categoria_emoji.get(tarea.categoria, '📋')
-            
-            dificultad_color = "🟢" if tarea.dificultad <= 3 else "🟡" if tarea.dificultad <= 6 else "🔴"
-            intervalos = int(tarea.tiempo_estimado / 30)
-            
-            st.markdown(f"""
-            {emoji} **{tarea.nombre}**  
-            📊 {tarea.categoria} • ⏱️ {tarea.tiempo_estimado}min ({intervalos} intervalos) • 📅 {tarea.frecuencia} • {dificultad_color} {tarea.dificultad}/10
-            """)
-        
-        with col2:
-            if st.button("🗑️", key=f"del_tarea_{i}", help="Eliminar tarea"):
-                st.session_state.tareas.pop(i)
-                st.rerun()
+    """Lista detallada CORREGIDA que muestra frecuencias correctas"""
+    
+    # Agrupar por frecuencia para mejor visualización
+    tareas_diarias = [t for t in st.session_state.tareas if t.frecuencia == 'diaria']
+    tareas_semanales = [t for t in st.session_state.tareas if t.frecuencia == 'semanal']
+    tareas_mensuales = [t for t in st.session_state.tareas if t.frecuencia == 'mensual']
+    
+    if tareas_diarias:
+        st.markdown("#### 📅 **Tareas Diarias** (se ejecutan todos los días)")
+        for i, tarea in enumerate(tareas_diarias):
+            _mostrar_tarea_item(tarea, i, "🔥")
+    
+    if tareas_semanales:
+        st.markdown("#### 📅 **Tareas Semanales** (se ejecutan 1 vez por semana)")
+        for i, tarea in enumerate(tareas_semanales, len(tareas_diarias)):
+            _mostrar_tarea_item(tarea, i, "📅")
+    
+    if tareas_mensuales:
+        st.markdown("#### 📅 **Tareas Mensuales** (se ejecutan 1 vez al mes)")
+        for i, tarea in enumerate(tareas_mensuales, len(tareas_diarias) + len(tareas_semanales)):
+            _mostrar_tarea_item(tarea, i, "🗓️")
 
+def _mostrar_tarea_item(tarea: Tarea, index: int, emoji_frecuencia: str):
+    """Muestra item de tarea con información clara"""
+    col1, col2 = st.columns([4, 1])
+    
+    with col1:
+        categoria_emoji = {
+            'Cocina': '🍳', 'Limpieza': '🧹', 'Lavandería': '👕',
+            'Compras': '🛒', 'Mantenimiento': '🔧', 'Organización': '📦'
+        }
+        emoji = categoria_emoji.get(tarea.categoria, '📋')
+        
+        # Color según frecuencia
+        color_frecuencia = {
+            'diaria': '🔥', 'semanal': '📅', 'mensual': '🗓️'
+        }
+        
+        dificultad_color = "🟢" if tarea.dificultad <= 3 else "🟡" if tarea.dificultad <= 6 else "🔴"
+        intervalos = int(tarea.tiempo_estimado / 30)
+        
+        st.markdown(f"""
+        {emoji} **{tarea.nombre}** {emoji_frecuencia}
+        📊 {tarea.categoria} • ⏱️ {tarea.tiempo_estimado}min ({intervalos} intervalos) • 
+        📅 **{tarea.frecuencia.upper()}** • {dificultad_color} {tarea.dificultad}/10
+        """)
+    
+    with col2:
+        if st.button("🗑️", key=f"del_tarea_{index}", help="Eliminar tarea"):
+            st.session_state.tareas.pop(index)
+            st.rerun()
 def _mostrar_demo_rapido():
     """Demo rápido para pruebas"""
     st.markdown("### 🎲 Demo Rápido")

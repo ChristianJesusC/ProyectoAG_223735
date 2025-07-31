@@ -11,7 +11,6 @@ class RangoTiempo:
     def __post_init__(self):
         if self.inicio >= self.fin:
             raise ValueError("Hora de inicio debe ser menor que fin")
-        # Redondear a intervalos de 30 minutos
         self.inicio = round(self.inicio * 2) / 2
         self.fin = round(self.fin * 2) / 2
     
@@ -235,8 +234,7 @@ class EspacioHogar:
                 Tarea("Limpiar jardín", "semanal", 120, 4, "Limpieza"),
                 Tarea("Mantener césped", "semanal", 60, 4, "Mantenimiento")
             ])
-        
-        # Tareas de balcón
+            
         if self.tiene_balcon:
             tareas_extras.extend([
                 Tarea("Limpiar balcón", "semanal", 45, 3, "Limpieza"),

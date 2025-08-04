@@ -6,7 +6,7 @@ from collections import defaultdict
 from functools import lru_cache
 from models import Roommate, Tarea, EspacioHogar
 
-class AlgoritmoGeneticoOptimizado:
+class AlgoritmoGenetico:
     def __init__(self, roommates: List[Roommate], tareas: List[Tarea], 
                  tam_poblacion: int = 50, generaciones: int = 30, espacio: EspacioHogar = None):
         
@@ -42,7 +42,6 @@ class AlgoritmoGeneticoOptimizado:
         self._cache_misses = 0
     
     def _precomputar_datos(self):
-        """OPTIMIZACIÓN: Pre-computa datos que no cambian durante la ejecución"""
         self.dias_semana = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
         self.semanas = [1, 2, 3, 4]
         
@@ -61,7 +60,6 @@ class AlgoritmoGeneticoOptimizado:
                 self.tareas_cocina_nombres.add(tarea.nombre)
     
     def _precompute_horarios_validos(self):
-        """Pre-computa horarios válidos para búsquedas O(1)"""
         self.horarios_validos = {}
         
         for roommate in self.roommates:
@@ -80,7 +78,6 @@ class AlgoritmoGeneticoOptimizado:
                 self.horarios_validos[roommate.nombre][dia] = horas_validas
     
     def _get_individuo_hash(self, individuo: Dict) -> str:
-            """OPTIMIZACIÓN: Genera hash único para cache de fitness"""
             items = []
             for key in sorted(individuo.keys()):
                 asig = individuo[key]
@@ -88,46 +85,6 @@ class AlgoritmoGeneticoOptimizado:
             return hash(tuple(items))
     
     def _ajustar_tareas_por_espacio(self):
-        """Ajusta tareas según características del espacio (optimizado)"""
-        tareas_ajustadas = []
-        
-        factor_limpieza = self.espacio.get_factor_tiempo_limpieza()
-        factores_equipamiento = {
-            categoria: self.espacio.get_factor_equipamiento(categoria)
-            for categoria in ['Limpieza', 'Cocina', 'Lavandería', 'Compras', 'Mantenimiento', 'Organización']
-        }
-        
-        for tarea in self.tareas:
-            tiempo_ajustado = tarea.tiempo_estimado
-            
-            if tarea.categoria == "Limpieza":
-                tiempo_ajustado = int(tiempo_ajustado * factor_limpieza)
-            
-            factor_equip = factores_equipamiento.get(tarea.categoria, 1.0)
-            tiempo_ajustado = int(tiempo_ajustado * factor_equip)
-            
-            tiempo_ajustado = ((tiempo_ajustado + 29) // 30) * 30
-            
-            tarea_ajustada = Tarea(
-                nombre=tarea.nombre,
-                frecuencia=tarea.frecuencia,
-                tiempo_estimado=tiempo_ajustado,
-                dificultad=tarea.dificultad,
-                categoria=tarea.categoria,
-                es_predeterminada=tarea.es_predeterminada
-            )
-            tareas_ajustadas.append(tarea_ajustada)
-        
-        if hasattr(self.espacio, 'generar_tareas_espaciales'):
-            tareas_espaciales = self.espacio.generar_tareas_espaciales()
-            tareas_ajustadas.extend(tareas_espaciales)
-        
-        self.tareas_dict.update({t.nombre: t for t in tareas_ajustadas})
-        
-        return tareas_ajustadas
-    
-    def _ajustar_tareas_por_espacio(self):
-        """Ajusta tareas según características del espacio (optimizado)"""
         tareas_ajustadas = []
         
         factor_limpieza = self.espacio.get_factor_tiempo_limpieza()
@@ -166,8 +123,7 @@ class AlgoritmoGeneticoOptimizado:
         return tareas_ajustadas
     
     def ejecutar(self, callback_progreso: Optional[Callable] = None):
-        """Método principal optimizado"""
-        poblacion = self._generar_poblacion_inicial_optimizada()
+        poblacion = self._generar_poblacion_inicial()
         historia_fitness = []
         
         if callback_progreso:
@@ -198,7 +154,7 @@ class AlgoritmoGeneticoOptimizado:
             fitness_poblacion = self._evaluar_poblacion_con_cache(poblacion)
             
             fitness_scores = [f[1] for f in fitness_poblacion]
-            diversidad = self._calcular_diversidad_optimizada(fitness_poblacion)
+            diversidad = self._calcular_diversidad(fitness_poblacion)
             
             estadisticas = {
                 'generacion': generacion,
@@ -247,7 +203,7 @@ class AlgoritmoGeneticoOptimizado:
                     })
                 break
             
-            poblacion = self._generar_nueva_poblacion_optimizada(fitness_poblacion, generacion)
+            poblacion = self._generar_nueva_poblacion(fitness_poblacion, generacion)
         
         if callback_progreso:
             callback_progreso(self.generaciones, {
@@ -263,8 +219,7 @@ class AlgoritmoGeneticoOptimizado:
         
         return mejor_individuo, historia_fitness
     
-    def _generar_poblacion_inicial_optimizada(self):
-        """OPTIMIZACIÓN: Generación de población inicial más eficiente"""
+    def _generar_poblacion_inicial(self):
         poblacion = []
         
         tareas_cocina = [t for t in self.tareas_ajustadas if t.categoria == 'Cocina']
@@ -273,25 +228,24 @@ class AlgoritmoGeneticoOptimizado:
         for _ in range(self.tam_poblacion):
             individuo = {}
             
-            self._garantizar_cocina_diaria_optimizada(individuo, tareas_cocina)
+            self._garantizar_cocina_diaria(individuo, tareas_cocina)
             
             for tarea in tareas_no_cocina:
-                self._asignar_tarea_mensual_optimizada(tarea, individuo)
+                self._asignar_tarea_mensual(tarea, individuo)
             
             poblacion.append(individuo)
         
         return poblacion
     
-    def _garantizar_cocina_diaria_optimizada(self, asignaciones: Dict, tareas_cocina: List[Tarea]):
-        """OPTIMIZACIÓN: Garantiza cocina diaria eficientemente"""
+    def _garantizar_cocina_diaria(self, asignaciones: Dict, tareas_cocina: List[Tarea]):
         if not tareas_cocina:
             return
         
         for semana in self.semanas:
             for dia in self.dias_semana:
                 tarea_cocina = random.choice(tareas_cocina)
-                roommate = self._seleccionar_roommate_optimo_optimizado(dia, tarea_cocina)
-                hora = self._seleccionar_hora_optima_optimizada(roommate.nombre, dia)
+                roommate = self._seleccionar_roommate_optimo(dia, tarea_cocina)
+                hora = self._seleccionar_hora_optima(roommate.nombre, dia)
                 
                 key = f"cocina_S{semana}_{dia}_{hora}"
                 asignaciones[key] = {
@@ -303,15 +257,14 @@ class AlgoritmoGeneticoOptimizado:
                     'duracion': tarea_cocina.tiempo_estimado
                 }
     
-    def _asignar_tarea_mensual_optimizada(self, tarea: Tarea, asignaciones: Dict):
-        """OPTIMIZACIÓN: Asignación optimizada de tareas mensuales"""
+    def _asignar_tarea_mensual(self, tarea: Tarea, asignaciones: Dict):
         repeticiones = self._get_repeticiones_mensuales(tarea)
         
         for rep in range(repeticiones):
             semana = random.choice(self.semanas)
             dia = random.choice(self.dias_semana)
-            roommate = self._seleccionar_roommate_optimo_optimizado(dia, tarea)
-            hora = self._seleccionar_hora_optima_optimizada(roommate.nombre, dia)
+            roommate = self._seleccionar_roommate_optimo(dia, tarea)
+            hora = self._seleccionar_hora_optima(roommate.nombre, dia)
             
             key = f"{tarea.nombre}_S{semana}_{rep}_{random.randint(1000,9999)}"
             asignaciones[key] = {
@@ -324,7 +277,6 @@ class AlgoritmoGeneticoOptimizado:
             }
     
     def _get_repeticiones_mensuales(self, tarea: Tarea) -> int:
-        """OPTIMIZACIÓN: Cálculo rápido de repeticiones"""
         if tarea.frecuencia == 'diaria':
             return 28
         elif tarea.frecuencia == 'semanal':
@@ -333,8 +285,7 @@ class AlgoritmoGeneticoOptimizado:
             return 1
         return 1
     
-    def _seleccionar_roommate_optimo_optimizado(self, dia: str, tarea: Tarea) -> Roommate:
-        """OPTIMIZACIÓN: Selección optimizada de roommate"""
+    def _seleccionar_roommate_optimo(self, dia: str, tarea: Tarea) -> Roommate:
         mejores_candidatos = []
         
         for roommate in self.roommates:
@@ -367,8 +318,7 @@ class AlgoritmoGeneticoOptimizado:
         
         return random.choice(candidatos_finales)[0]
     
-    def _seleccionar_hora_optima_optimizada(self, roommate_nombre: str, dia: str) -> float:
-        """OPTIMIZACIÓN: Selección rápida de hora usando datos pre-computados"""
+    def _seleccionar_hora_optima(self, roommate_nombre: str, dia: str) -> float:
         horas_validas = self.horarios_validos.get(roommate_nombre, {}).get(dia, set())
         
         if not horas_validas:
@@ -377,7 +327,6 @@ class AlgoritmoGeneticoOptimizado:
         return random.choice(list(horas_validas))
     
     def _evaluar_poblacion_con_cache(self, poblacion: List[Dict]) -> List[Tuple[Dict, float]]:
-        """OPTIMIZACIÓN: Evaluación con cache de fitness"""
         resultados = []
         
         for individuo in poblacion:
@@ -387,7 +336,7 @@ class AlgoritmoGeneticoOptimizado:
                 fitness = self._fitness_cache[hash_individuo]
                 self._cache_hits += 1
             else:
-                fitness = self.calcular_fitness_optimizado(individuo)
+                fitness = self.calcular_fitness(individuo)
                 self._fitness_cache[hash_individuo] = fitness
                 self._cache_misses += 1
             
@@ -400,19 +349,18 @@ class AlgoritmoGeneticoOptimizado:
         else:
             return sorted(resultados, key=lambda x: x[1], reverse=True)
     
-    def calcular_fitness_optimizado(self, individuo: Dict) -> float:
-        """OPTIMIZACIÓN: Cálculo de fitness optimizado"""
+    def calcular_fitness(self, individuo: Dict) -> float:
         if not individuo:
             return 0.0
         
         try:
             fitness_componentes = {
-                'equidad': self._fitness_equidad_optimizado(individuo),
-                'compatibilidad': self._fitness_compatibilidad_optimizado(individuo),
-                'habilidades': self._fitness_habilidades_optimizado(individuo),
-                'cocina_diaria': self._fitness_cocina_diaria_optimizado(individuo),
-                'preferencias': self._fitness_preferencias_optimizado(individuo),
-                'rotacion_espacial': self._fitness_rotacion_espacial_optimizado(individuo)
+                'equidad': self._fitness_equidad(individuo),
+                'compatibilidad': self._fitness_compatibilidad(individuo),
+                'habilidades': self._fitness_habilidades(individuo),
+                'cocina_diaria': self._fitness_cocina_diaria(individuo),
+                'preferencias': self._fitness_preferencias(individuo),
+                'rotacion_espacial': self._fitness_rotacion_espacial(individuo)
             }
             
             fitness_total = sum(
@@ -425,8 +373,7 @@ class AlgoritmoGeneticoOptimizado:
         except Exception:
             return 0.0
     
-    def _fitness_equidad_optimizado(self, individuo: Dict) -> float:
-        """OPTIMIZACIÓN: Cálculo de equidad con numpy"""
+    def _fitness_equidad(self, individuo: Dict) -> float:
         cargas = defaultdict(int)
         
         for asig in individuo.values():
@@ -440,8 +387,7 @@ class AlgoritmoGeneticoOptimizado:
         
         return 1.0 / (1.0 + varianza / 1000)
     
-    def _fitness_compatibilidad_optimizado(self, individuo: Dict) -> float:
-        """OPTIMIZACIÓN: Compatibilidad usando datos pre-computados"""
+    def _fitness_compatibilidad(self, individuo: Dict) -> float:
         score_total = 0
         asignaciones_validas = 0
         
@@ -459,8 +405,7 @@ class AlgoritmoGeneticoOptimizado:
         
         return score_total / asignaciones_validas if asignaciones_validas > 0 else 0
     
-    def _fitness_habilidades_optimizado(self, individuo: Dict) -> float:
-        """OPTIMIZACIÓN: Habilidades con búsquedas O(1)"""
+    def _fitness_habilidades(self, individuo: Dict) -> float:
         score_total = 0
         num_asignaciones = len(individuo)
         
@@ -474,8 +419,7 @@ class AlgoritmoGeneticoOptimizado:
         
         return score_total / num_asignaciones if num_asignaciones > 0 else 0
     
-    def _fitness_cocina_diaria_optimizado(self, individuo: Dict) -> float:
-        """OPTIMIZACIÓN: Cocina diaria con set pre-computado"""
+    def _fitness_cocina_diaria(self, individuo: Dict) -> float:
         dias_con_cocina = set()
         
         for asig in individuo.values():
@@ -485,8 +429,7 @@ class AlgoritmoGeneticoOptimizado:
         total_dias_posibles = len(self.semanas) * len(self.dias_semana)
         return len(dias_con_cocina) / total_dias_posibles
     
-    def _fitness_preferencias_optimizado(self, individuo: Dict) -> float:
-        """OPTIMIZACIÓN: Preferencias con lookup O(1)"""
+    def _fitness_preferencias(self, individuo: Dict) -> float:
         score_total = 0
         
         for asig in individuo.values():
@@ -504,8 +447,7 @@ class AlgoritmoGeneticoOptimizado:
         
         return max(0, score_total) / len(individuo) if individuo else 0
     
-    def _fitness_rotacion_espacial_optimizado(self, individuo: Dict) -> float:
-        """OPTIMIZACIÓN: Rotación espacial con estructuras eficientes"""
+    def _fitness_rotacion_espacial(self, individuo: Dict) -> float:
         factor_complejidad = self.espacio.get_factor_rotacion_complejidad()
         
         diversidad_por_semana = defaultdict(lambda: defaultdict(set))
@@ -536,8 +478,7 @@ class AlgoritmoGeneticoOptimizado:
         
         return min(1.0, diversidad_promedio / num_categorias)
     
-    def _calcular_diversidad_optimizada(self, fitness_poblacion: List[Tuple]) -> float:
-        """OPTIMIZACIÓN: Diversidad con sampling para poblaciones grandes"""
+    def _calcular_diversidad(self, fitness_poblacion: List[Tuple]) -> float:
         if len(fitness_poblacion) < 2:
             return 1.0
         
@@ -551,13 +492,12 @@ class AlgoritmoGeneticoOptimizado:
         distancias = []
         for i in range(len(muestra)):
             for j in range(i + 1, len(muestra)):
-                dist = self._distancia_hamming_optimizada(muestra[i], muestra[j])
+                dist = self._distancia_hamming(muestra[i], muestra[j])
                 distancias.append(dist)
         
         return np.mean(distancias) if distancias else 0.0
     
-    def _distancia_hamming_optimizada(self, cronograma1: Dict, cronograma2: Dict) -> float:
-        """OPTIMIZACIÓN: Distancia Hamming vectorizada"""
+    def _distancia_hamming(self, cronograma1: Dict, cronograma2: Dict) -> float:
         if not cronograma1 or not cronograma2:
             return 1.0
         
@@ -583,42 +523,39 @@ class AlgoritmoGeneticoOptimizado:
         
         return diferencias / total_comparaciones if total_comparaciones > 0 else 0
     
-    def _generar_nueva_poblacion_optimizada(self, fitness_poblacion: List[Tuple], generacion: int):
-        """OPTIMIZACIÓN: Generación de población con operaciones vectorizadas"""
-        
+    def _generar_nueva_poblacion(self, fitness_poblacion: List[Tuple], generacion: int):
         parejas = self._emparejamiento_selectivo_mejorado(fitness_poblacion)
         
         descendencia = []
         for padre1, padre2 in parejas:
-            hijo1 = self._cruza_multipunto_aleatorio_optimizado(padre1, padre2)
-            hijo2 = self._cruza_multipunto_aleatorio_optimizado(padre2, padre1)
+            hijo1 = self._cruza_multipunto_aleatorio(padre1, padre2)
+            hijo2 = self._cruza_multipunto_aleatorio(padre2, padre1)
             
-            hijo1 = self._mutacion_adaptativa_optimizada(hijo1, generacion)
-            hijo2 = self._mutacion_adaptativa_optimizada(hijo2, generacion)
+            hijo1 = self._mutacion_adaptativa(hijo1, generacion)
+            hijo2 = self._mutacion_adaptativa(hijo2, generacion)
             
             descendencia.extend([hijo1, hijo2])
         
         padres = [ind for ind, _ in fitness_poblacion]
         poblacion_extendida = padres + descendencia
         
-        return self._poda_elitista_optimizada(poblacion_extendida)
+        return self._poda_elitista(poblacion_extendida)
     
-    def _cruza_multipunto_aleatorio_optimizado(self, padre1: Dict, padre2: Dict) -> Dict:
-        """OPTIMIZACIÓN: Cruza optimizada con menos copias"""
+    def _cruza_multipunto_aleatorio(self, padre1: Dict, padre2: Dict) -> Dict:
         fitness_padre1 = self._fitness_cache.get(self._get_individuo_hash(padre1))
         fitness_padre2 = self._fitness_cache.get(self._get_individuo_hash(padre2))
         
         if fitness_padre1 is None:
-            fitness_padre1 = self.calcular_fitness_optimizado(padre1)
+            fitness_padre1 = self.calcular_fitness(padre1)
         if fitness_padre2 is None:
-            fitness_padre2 = self.calcular_fitness_optimizado(padre2)
+            fitness_padre2 = self.calcular_fitness(padre2)
         
         keys_padre1 = set(padre1.keys())
         keys_padre2 = set(padre2.keys())
         keys_comunes = list(keys_padre1 & keys_padre2)
         
         if len(keys_comunes) < 3:
-            return self._crossover_uniforme_optimizado(padre1, padre2, fitness_padre1, fitness_padre2)
+            return self._crossover_uniforme(padre1, padre2, fitness_padre1, fitness_padre2)
         
         keys_comunes.sort()
         
@@ -628,7 +565,7 @@ class AlgoritmoGeneticoOptimizado:
         num_puntos = random.randint(2, max_puntos)
         
         if len(keys_comunes) - 1 < num_puntos:
-            return self._crossover_uniforme_optimizado(padre1, padre2, fitness_padre1, fitness_padre2)
+            return self._crossover_uniforme(padre1, padre2, fitness_padre1, fitness_padre2)
         
         puntos_cruza = sorted(random.sample(range(1, len(keys_comunes)), num_puntos))
         
@@ -648,14 +585,13 @@ class AlgoritmoGeneticoOptimizado:
                 usar_mejor_padre = not usar_mejor_padre
             inicio = punto
         
-        self._agregar_claves_unicas_optimizado(hijo, padre1, padre2, 
+        self._agregar_claves_unicas(hijo, padre1, padre2, 
                                               set(keys_comunes), fitness_padre1, fitness_padre2)
         
         return self._reparar_cronograma_basico(hijo)
     
-    def _crossover_uniforme_optimizado(self, padre1: Dict, padre2: Dict, 
+    def _crossover_uniforme(self, padre1: Dict, padre2: Dict, 
                                      fitness1: float, fitness2: float) -> Dict:
-        """OPTIMIZACIÓN: Crossover uniforme más eficiente"""
         hijo = {}
         probabilidad_mejor = 0.7 if fitness1 > fitness2 else 0.3
         padre_mejor = padre1 if fitness1 > fitness2 else padre2
@@ -671,9 +607,8 @@ class AlgoritmoGeneticoOptimizado:
         
         return hijo
     
-    def _agregar_claves_unicas_optimizado(self, hijo: Dict, padre1: Dict, padre2: Dict,
+    def _agregar_claves_unicas(self, hijo: Dict, padre1: Dict, padre2: Dict,
                                         keys_comunes_set: Set, fitness1: float, fitness2: float):
-        """OPTIMIZACIÓN: Agregar claves únicas eficientemente"""
         if fitness1 > fitness2:
             prob_padre1, prob_padre2 = 0.75, 0.25
         elif fitness2 > fitness1:
@@ -692,14 +627,12 @@ class AlgoritmoGeneticoOptimizado:
             if key not in hijo and random.random() < prob_padre2:
                 hijo[key] = padre2[key].copy()
     
-    def _mutacion_adaptativa_optimizada(self, individuo: Dict, generacion: Optional[int] = None) -> Dict:
-        """OPTIMIZACIÓN: Mutación adaptativa más eficiente"""
-        
+    def _mutacion_adaptativa(self, individuo: Dict, generacion: Optional[int] = None) -> Dict:
         hash_individuo = self._get_individuo_hash(individuo)
         fitness_individuo = self._fitness_cache.get(hash_individuo)
         
         if fitness_individuo is None:
-            fitness_individuo = self.calcular_fitness_optimizado(individuo)
+            fitness_individuo = self.calcular_fitness(individuo)
         
         if fitness_individuo > 120:
             factor_proteccion = 0.2
@@ -739,24 +672,22 @@ class AlgoritmoGeneticoOptimizado:
             return individuo
         
         if tipo_individuo in ["excelente", "bueno"]:
-            self._intercambio_suave_optimizado(individuo, genes_a_mutar)
+            self._intercambio_suave(individuo, genes_a_mutar)
         else:
-            self._intercambiar_genes_aleatorio_optimizado(individuo, genes_a_mutar)
+            self._intercambiar_genes_aleatorio(individuo, genes_a_mutar)
         
         return self._reparar_cronograma_basico(individuo)
     
-    def _intercambio_suave_optimizado(self, individuo: Dict, genes_disponibles: List[str]):
-        """OPTIMIZACIÓN: Intercambio suave más eficiente"""
+    def _intercambio_suave(self, individuo: Dict, genes_disponibles: List[str]):
         if len(genes_disponibles) < 2:
             return
         
         if random.random() < 0.6:
-            self._intercambiar_horarios_mismo_dia_optimizado(individuo, genes_disponibles)
+            self._intercambiar_horarios_mismo_dia(individuo, genes_disponibles)
         else:
-            self._intercambiar_dias_misma_semana_optimizado(individuo, genes_disponibles)
+            self._intercambiar_dias_misma_semana(individuo, genes_disponibles)
     
-    def _intercambiar_dias_misma_semana_optimizado(self, individuo: Dict, genes: List[str]):
-        """OPTIMIZACIÓN: Intercambio por semana con defaultdict"""
+    def _intercambiar_dias_misma_semana(self, individuo: Dict, genes: List[str]):
         if len(genes) < 2:
             return
         
@@ -771,19 +702,16 @@ class AlgoritmoGeneticoOptimizado:
                 individuo[gene1]['dia'], individuo[gene2]['dia'] = \
                     individuo[gene2]['dia'], individuo[gene1]['dia']
     
-    def _intercambiar_genes_aleatorio_optimizado(self, individuo: Dict, genes_disponibles: List[str]):
-        """OPTIMIZACIÓN: Intercambio aleatorio más eficiente"""
-        
+    def _intercambiar_genes_aleatorio(self, individuo: Dict, genes_disponibles: List[str]):
         rand_val = random.random()
         if rand_val < 0.6:
-            self._intercambiar_roommates_compatibles_optimizado(individuo, genes_disponibles)
+            self._intercambiar_roommates_compatibles(individuo, genes_disponibles)
         elif rand_val < 0.85:
-            self._intercambiar_horarios_mismo_dia_optimizado(individuo, genes_disponibles)
+            self._intercambiar_horarios_mismo_dia(individuo, genes_disponibles)
         else:
-            self._intercambiar_dias_semanas_optimizado(individuo, genes_disponibles)
+            self._intercambiar_dias_semanas(individuo, genes_disponibles)
     
-    def _intercambiar_roommates_compatibles_optimizado(self, individuo: Dict, genes: List[str]):
-        """OPTIMIZACIÓN: Intercambio de roommates con groupby"""
+    def _intercambiar_roommates_compatibles(self, individuo: Dict, genes: List[str]):
         if len(genes) < 2:
             return
         
@@ -799,8 +727,7 @@ class AlgoritmoGeneticoOptimizado:
                 individuo[gene1]['roommate'], individuo[gene2]['roommate'] = \
                     individuo[gene2]['roommate'], individuo[gene1]['roommate']
     
-    def _intercambiar_horarios_mismo_dia_optimizado(self, individuo: Dict, genes: List[str]):
-        """OPTIMIZACIÓN: Intercambio de horarios con agrupación eficiente"""
+    def _intercambiar_horarios_mismo_dia(self, individuo: Dict, genes: List[str]):
         if len(genes) < 2:
             return
         
@@ -816,8 +743,7 @@ class AlgoritmoGeneticoOptimizado:
                 individuo[gene1]['hora'], individuo[gene2]['hora'] = \
                     individuo[gene2]['hora'], individuo[gene1]['hora']
     
-    def _intercambiar_dias_semanas_optimizado(self, individuo: Dict, genes: List[str]):
-        """OPTIMIZACIÓN: Intercambio de días/semanas directo"""
+    def _intercambiar_dias_semanas(self, individuo: Dict, genes: List[str]):
         if len(genes) < 2:
             return
         
@@ -830,9 +756,7 @@ class AlgoritmoGeneticoOptimizado:
             individuo[gene1]['semana'], individuo[gene2]['semana'] = \
                 individuo[gene2]['semana'], individuo[gene1]['semana']
     
-    def _poda_elitista_optimizada(self, poblacion_extendida: List[Dict]) -> List[Dict]:
-        """OPTIMIZACIÓN: Poda elitista más eficiente"""
-        
+    def _poda_elitista(self, poblacion_extendida: List[Dict]) -> List[Dict]:
         if len(poblacion_extendida) <= self.tam_poblacion:
             return poblacion_extendida
         
@@ -845,7 +769,7 @@ class AlgoritmoGeneticoOptimizado:
         candidatos_top50 = poblacion_con_fitness[num_elites:int(len(poblacion_con_fitness) * 0.5)]
         if candidatos_top50:
             num_diversos = max(2, int(self.tam_poblacion * 0.08))
-            diversos = self._seleccionar_diversos_optimizado([ind for ind, _ in candidatos_top50], num_diversos)
+            diversos = self._seleccionar_diversos([ind for ind, _ in candidatos_top50], num_diversos)
             poblacion_podada.extend(diversos)
             
             diversos_set = set(id(d) for d in diversos)
@@ -882,8 +806,7 @@ class AlgoritmoGeneticoOptimizado:
         
         return poblacion_podada[:self.tam_poblacion]
     
-    def _seleccionar_diversos_optimizado(self, candidatos: List[Dict], cantidad: int) -> List[Dict]:
-        """OPTIMIZACIÓN: Selección de diversidad más eficiente"""
+    def _seleccionar_diversos(self, candidatos: List[Dict], cantidad: int) -> List[Dict]:
         if not candidatos or cantidad <= 0:
             return []
         
@@ -906,7 +829,7 @@ class AlgoritmoGeneticoOptimizado:
             mejor_distancia_minima = -1
             
             for candidato in muestra_candidatos:
-                distancias = [self._distancia_hamming_optimizada(candidato, seleccionado) 
+                distancias = [self._distancia_hamming(candidato, seleccionado) 
                             for seleccionado in diversos]
                 distancia_minima = min(distancias) if distancias else 0
                 
@@ -923,11 +846,9 @@ class AlgoritmoGeneticoOptimizado:
         return diversos
     
     def _reparar_cronograma_basico(self, cronograma: Dict) -> Dict:
-        """OPTIMIZACIÓN: Reparación básica optimizada"""
-        return self._verificar_cocina_diaria_optimizada(cronograma)
+        return self._verificar_cocina_diaria(cronograma)
     
-    def _verificar_cocina_diaria_optimizada(self, cronograma: Dict) -> Dict:
-        """OPTIMIZACIÓN: Verificación de cocina más eficiente"""
+    def _verificar_cocina_diaria(self, cronograma: Dict) -> Dict:
         if not self.tareas_cocina_nombres:
             return cronograma
         
@@ -945,8 +866,8 @@ class AlgoritmoGeneticoOptimizado:
                     tarea_cocina_nombre = random.choice(list(self.tareas_cocina_nombres))
                     tarea_cocina = self.tareas_dict[tarea_cocina_nombre]
                     
-                    roommate = self._seleccionar_roommate_optimo_optimizado(dia, tarea_cocina)
-                    hora = self._seleccionar_hora_optima_optimizada(roommate.nombre, dia)
+                    roommate = self._seleccionar_roommate_optimo(dia, tarea_cocina)
+                    hora = self._seleccionar_hora_optima(roommate.nombre, dia)
                     
                     key = f"cocina_reparacion_S{semana}_{dia}_{random.randint(1000,9999)}"
                     cronograma[key] = {
@@ -961,7 +882,6 @@ class AlgoritmoGeneticoOptimizado:
         return cronograma
     
     def _emparejamiento_selectivo_mejorado(self, fitness_poblacion: List[Tuple]) -> List[Tuple]:
-        """Conservado: Estrategia de emparejamiento selectivo mejorado"""
         poblacion_ordenada = sorted(fitness_poblacion, key=lambda x: x[1], reverse=True)
         parejas = []
         
@@ -990,13 +910,11 @@ class AlgoritmoGeneticoOptimizado:
         return parejas
     
     def _calcular_desviacion_estandar(self, fitness_scores: List[float]) -> float:
-        """Conservado: Cálculo de desviación estándar"""
         if not fitness_scores:
             return 0
         return np.std(fitness_scores)
     
     def _calcular_mejora(self, historia: List[Dict]) -> float:
-        """Conservado: Cálculo de mejora porcentual"""
         if len(historia) < 2:
             return 0
         anterior = historia[-2]['mejor']
@@ -1004,7 +922,6 @@ class AlgoritmoGeneticoOptimizado:
         return ((actual - anterior) / anterior * 100) if anterior > 0 else 0
     
     def _detectar_convergencia_temprana(self, historia: List[Dict], ventana: int = 7, umbral: float = 0.2) -> bool:
-        """Conservado: Detección de convergencia temprana"""
         if len(historia) < ventana:
             return False
         
@@ -1018,5 +935,3 @@ class AlgoritmoGeneticoOptimizado:
         mejora_promedio_pct = (mejora_promedio / ultimos_promedio[0] * 100) if ultimos_promedio[0] > 0 else 0
         
         return mejora_mejor_pct < umbral and mejora_promedio_pct < umbral
-
-AlgoritmoGenetico = AlgoritmoGeneticoOptimizado
